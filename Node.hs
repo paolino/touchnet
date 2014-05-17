@@ -1,4 +1,5 @@
 {-# LANGUAGE ViewPatterns, PatternSynonyms #-}
+
 import System.Random (randomR, StdGen, randomRs, mkStdGen)
 import Data.Maybe (catMaybes, isJust)
 import Control.Arrow ((&&&), first, second)
@@ -26,24 +27,30 @@ type Freq = Int
 data Chan = Common | Chan Freq deriving (Eq,Ord)
 
 data Seq a = Seq Int [a]
+
 core (Seq i x) = x
+
 dropSeq (Seq i (x:xs)) = Seq i xs
 
 instance Eq (Seq a) where
         (==) (Seq i _) (Seq j _) = i == j
+
 instance Show a => Show (Seq a) where
         show (Seq i xs) = show (i,take 5 xs)
 
 type MF = Maybe Freq
+
 data Node = Node {
-        transmit :: Seq MF,
-        receives :: [(Seq MF,Int)],
-        contract :: Seq Bool,
-        publicity :: Bool,
-        collect :: Bool
+        transmit :: Seq MF, -- ^ transmitting sequence
+        receives :: [(Seq MF,Int)], -- ^ set of receiving sequences
+        contract :: Seq Bool, -- ^ self spot sequence
+        publicity :: Bool, -- ^ sync self spot condition
+        collect :: Bool -- ^ sequence harvesting
         } deriving (Show)
 
+-- | expose a node and a stepping , to permit node changing and query while hiding the stepping state
 data Close = Close Node (Node -> Step)
+
 -- | Stepping results. Any constructor result hold the new node. Receiving mode is completed with the received message
 data Step      = Receive Chan (Maybe (Seq MF) -> Close)  -- ^ receive mode , possibly receive a seq on chan
                 | Transmit Chan (Seq MF) Close  -- ^ transmit mode, send a seq on chan
@@ -72,11 +79,14 @@ insertSeq s n@(Node ts rss ps l q)
                 | s `elem` map fst rss  = n
                 | otherwise = Node ts ((s,0) : rss) ps l q
 
+-- | Stepping state
 data Cond = MustTransmit | MustReceive | UnMust
 
+-- | close a node and its future
 close :: Cond -> Node -> Close
 close c n = Close n (step c)
 
+-- | specialized for unmust
 closeU :: Node -> Close
 closeU = close UnMust
 
@@ -133,6 +143,10 @@ mkNode ((*3) -> n) chans freq freqC = Node
         True
         True
 
+
+-- | create the maxint distinct nodes
+mkWorld chans freq freqC = [mkStep (mkNode i chans freq freqC) | i <- [0..]]
+
 -- | eliminate unresponsive sequences
 forget :: Int -> Node -> Node
 forget n (Node ts rss ps l q) = Node ts (filter ((> negate n) . snd) rss)  ps l q
@@ -141,6 +155,10 @@ forget n (Node ts rss ps l q) = Node ts (filter ((> negate n) . snd) rss)  ps l 
 listened :: Node -> Bool
 listened (Node s rss _ _ _) = s `elem` map fst rss
 
+inspect :: Step -> Node
+inspect (Sleep (Close n _)) = n
+inspect (Transmit _ _  (Close n _)) = n
+inspect (Receive _ (($ Nothing) -> Close n _)) = n
 {-
 
 -- | A list of Nodes with a 2d pos
