@@ -1,8 +1,8 @@
 {-# LANGUAGE ViewPatterns, PatternSynonyms #-}
-import System.Random (randomR, StdGen)
+import System.Random (randomR, StdGen, randomRs, mkStdGen)
 import Data.Maybe (catMaybes, isJust)
 import Control.Arrow ((&&&), first, second)
-import Data.List (lookup, groupBy, sortBy)
+import Data.List (lookup, groupBy, sortBy, mapAccumL)
 import Data.Ord (comparing)
 import Data.Function  (on)
 
@@ -25,29 +25,32 @@ type Freq = Int
 
 data Chan = Common | Chan Freq deriving (Eq,Ord)
 
-data Seq = Seq Int [Maybe Freq]
+data Seq a = Seq Int [a]
 core (Seq i x) = x
 dropSeq (Seq i (x:xs)) = Seq i xs
 
-instance Eq Seq where
+instance Eq (Seq a) where
         (==) (Seq i _) (Seq j _) = i == j
+instance Show a => Show (Seq a) where
+        show (Seq i xs) = show (i,take 5 xs)
 
+type MF = Maybe Freq
 data Node = Node {
-        duty :: Bool,
-        transmit :: Seq,
-        receives :: [(Seq,Int)],
-        publ :: [Bool],
-        widen :: [Bool]
-        }
+        transmit :: Seq MF,
+        receives :: [(Seq MF,Int)],
+        contract :: Seq Bool,
+        publicity :: Bool,
+        collect :: Bool
+        } deriving (Show)
 
-
+data Close = Close Node (Node -> Step)
 -- | Stepping results. Any constructor result hold the new node. Receiving mode is completed with the received message
-data Step      = Receive Chan (Maybe Seq -> Node)  -- ^ receive mode , possibly receive a seq on chan
-                | Transmit Chan Seq Node  -- ^ transmit mode, send a seq on chan
-                | Sleep Node  -- ^ sleep mode , just step
+data Step      = Receive Chan (Maybe (Seq MF) -> Close)  -- ^ receive mode , possibly receive a seq on chan
+                | Transmit Chan (Seq MF) Close  -- ^ transmit mode, send a seq on chan
+                | Sleep Close  -- ^ sleep mode , just step
 
 -- | split a list of Step 
-partitionStep :: [Step] -> ([((Chan,Seq),Node)],[(Chan,Maybe Seq -> Node)],[Node])
+partitionStep :: [Step] -> ([((Chan,Seq MF),Close)],[(Chan,Maybe (Seq MF) -> Close)],[Close])
 partitionStep [] = ([],[],[])
 partitionStep (Transmit c s n : xs) = let
         (ts,rs,ss) = partitionStep xs
@@ -60,47 +63,86 @@ partitionStep (Sleep n : xs) = let
         in (ts,rs,n:ss)
 
 -- | view pattern that forget heads of receivers
-stepReceivers :: [(Seq,Int)] -> [(Seq,Int)]
+stepReceivers :: [(Seq MF,Int)] -> [(Seq MF,Int)]
 stepReceivers = map (first dropSeq)
 
--- | 
-agnosticReceive n Nothing = n
-agnosticReceive n (Just s) = insertSeq s $ n 
-
 -- | insert a new receiver in a node 
-insertSeq :: Seq -> Node -> Node
-insertSeq s n@(Node False ts rss ps ws) 
+insertSeq :: Seq MF -> Node -> Node
+insertSeq s n@(Node ts rss ps l q) 
                 | s `elem` map fst rss  = n
-                | otherwise = Node False ts ((s,0) : rss) ps ws 
+                | otherwise = Node ts ((s,0) : rss) ps l q
 
+data Cond = MustTransmit | MustReceive | UnMust
+
+close :: Cond -> Node -> Close
+close c n = Close n (step c)
+
+closeU :: Node -> Close
+closeU = close UnMust
 
 -- | Core logic. Node fields are tested sequentially with pattern matching. First success fires the right Step
-step :: Node -> Step 
--- obliged to listen in the common chan
-step (Node True (dropSeq -> ts) (stepReceivers -> rss) (_:ps) (_:ws)) = Receive Common . agnosticReceive $ Node False ts rss ps ws
+step :: Cond -> Node -> Step 
+-- obliged to listen in the common chan after a publ
+step MustReceive (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Receive Common f where
+        f Nothing = closeU (Node ts rss ps l q) 
+        f (Just s) = closeU (insertSeq s $ Node ts rss ps l q) 
+-- try to publ on a sync window
+step  MustTransmit (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Transmit Common ts . closeU $ Node ts rss ps l q
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
-step (Node False (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (_:ps) (_:ws)) 
-        = Transmit (Chan c) (dropSeq . fst $ x) $ Node False (Seq i ts) (stepReceivers rss) ps ws
+step UnMust (Node (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (dropSeq -> ps) l q) 
+        = Transmit (Chan c) (dropSeq . fst $ x) . closeU $ Node (Seq i ts) (stepReceivers rss) ps l q
 --  time to listen on a receiving seq
-step    (Node False (dropSeq -> ts) 
+step UnMust (Node (dropSeq -> ts) 
                 (select (isJust . head . core . fst) -> Just ((Seq i (Just c:xs),n),g)) 
-                (_:ps) (_:ws)) = Receive (Chan c) f where
-        new k = Node False ts (stepReceivers $ g (Seq i $ Just c : xs,k)) ps ws
-        f Nothing = new $ n - 1
-        f (Just s) = insertSeq s . new $ 0
+                (dropSeq -> ps) l q) = Receive (Chan c) f where
+        new k = Node ts (stepReceivers $ g (Seq i $ Just c : xs,k)) ps l q
+        f Nothing = closeU $ new $ n - 1
+        f (Just s) = closeU $ insertSeq s . new $ 0
 -- time to transmit on common chan our transmit seq, setting the duty to listen right after
-step (Node False (dropSeq -> ts) (stepReceivers -> rss) (True:ps) (_:ws)) = Transmit Common ts $ Node True ts rss ps ws 
+step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (Seq i (True:ps)) l q) = Transmit Common ts $ close MustReceive $ Node ts rss (Seq i ps) l q
 -- time to receive freely on common channel
-step (Node False (dropSeq -> ts) (stepReceivers -> rss) (_:ps) (True:ws)) = Receive Common . agnosticReceive $ Node False ts rss ps ws
+step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l (id &&& (l ||) -> (q,True))) = Receive Common f where
+        f Nothing = closeU $ Node ts rss ps l q
+        f (Just s) =  close (if l then MustTransmit else UnMust) $ (if q then insertSeq s else id) $ Node ts rss ps l q
 -- time to sleep
-step (Node False (dropSeq -> ts) (stepReceivers -> rss) (_:ps) (_:ws)) = Sleep $ Node False ts rss ps ws
+step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Sleep . closeU $ Node ts rss ps l q
 
+-- boot a node
+mkStep :: Node -> Step
+mkStep = Sleep . close UnMust
+
+
+mkBoolSeq :: Int -> Int -> Seq Bool
+mkBoolSeq n freq = Seq n $ map (==0) $ randomRs (0,freq) $ mkStdGen n
+
+mkSeq :: Int -> Int -> Int -> Seq MF
+mkSeq n chans freq = let
+        Seq _ fs = mkBoolSeq n freq
+        cs = randomRs (0,chans) $ mkStdGen $ n + 1
+        in Seq n $ snd $ mapAccumL (\(c:cs) d -> if d then (cs, Just c) else (cs,Nothing)) cs fs
+
+mkNode  :: Int -- ^ node unique id
+        -> Int -- ^ number of channels
+        -> Int -- ^ mean delta between data transmission
+        -> Int -- ^ mean delta between self spots
+        -> Node
+mkNode ((*3) -> n) chans freq freqC = Node
+        (mkSeq n chans freq)
+        []
+        (mkBoolSeq (n + 2) freqC)
+        True
+        True
 
 -- | eliminate unresponsive sequences
 forget :: Int -> Node -> Node
-forget n (Node v ts rss ps ws) = Node v ts (filter ((> negate n) . snd) rss)  ps ws
+forget n (Node ts rss ps l q) = Node ts (filter ((> negate n) . snd) rss)  ps l q
+
+-- | check if node is indirectly spotted
+listened :: Node -> Bool
+listened (Node s rss _ _ _) = s `elem` map fst rss
 
 {-
+
 -- | A list of Nodes with a 2d pos
 type World = [(Node, Pos)]
 
@@ -112,8 +154,7 @@ type Pos = (Float,Float)
 distance r px py = (sqrt $ (px -. py) ^-^ 2) < r
 
 stepWorld :: Int -> World -> World
-stepWorld v ns = let
-        xs = map step ns 
+stepWorld v ns =xs = map step ns 
         (unzip -> (ts,nts),rs,ss) = partitionStep xs
         ms = map head . filter ((==) 1 . length) . groupBy ((==) `on` fst ) . sortBy (comparing fst ) $ ts
         nrs = map f rs
