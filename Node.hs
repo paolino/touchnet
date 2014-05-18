@@ -21,23 +21,32 @@ select f (x:xs)
         | otherwise =  fmap (second $ fmap (x:)) $ select f xs
 -------------------------------------------------------------
 
-
+-- | A radio channel
 type Freq = Int
 
+-- | Separation by construction of the link channel from the data channels
 data Chan = Common | Chan Freq deriving (Eq,Ord)
 
+-- | A sequence is an infinite list of something with an identifier 
 data Seq a = Seq Int [a]
 
+core :: Seq a -> [a]
 core (Seq i x) = x
 
-dropSeq (Seq i (x:xs)) = Seq i xs
+-- | extract the tail of a Seq
+tailSeq :: Seq a -> Seq a
+tailSeq (Seq i (x:xs)) = Seq i xs
 
+-- | match sequences by identifier . A lot of differentiating power is lost
 instance Eq (Seq a) where
         (==) (Seq i _) (Seq j _) = i == j
 
+-- | debugging instance
 instance Show a => Show (Seq a) where
         show (Seq i xs) = show (i,take 5 xs)
 
+
+-- | the value of sequences 
 type MF = Maybe Freq
 
 data Node = Node {
@@ -71,7 +80,7 @@ partitionStep (Sleep n : xs) = let
 
 -- | view pattern that forget heads of receivers
 stepReceivers :: [(Seq MF,Int)] -> [(Seq MF,Int)]
-stepReceivers = map (first dropSeq)
+stepReceivers = map (first tailSeq)
 
 -- | insert a new receiver in a node 
 insertSeq :: Seq MF -> Node -> Node
@@ -93,29 +102,29 @@ closeU = close UnMust
 -- | Core logic. Node fields are tested sequentially with pattern matching. First success fires the right Step
 step :: Cond -> Node -> Step 
 -- obliged to listen in the common chan after a publ
-step MustReceive (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Receive Common f where
+step MustReceive (Node (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q) = Receive Common f where
         f Nothing = closeU (Node ts rss ps l q) 
         f (Just s) = closeU (insertSeq s $ Node ts rss ps l q) 
 -- try to publ on a sync window
-step  MustTransmit (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Transmit Common ts . closeU $ Node ts rss ps l q
+step  MustTransmit (Node (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q) = Transmit Common ts . closeU $ Node ts rss ps l q
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
-step UnMust (Node (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (dropSeq -> ps) l q) 
-        = Transmit (Chan c) (dropSeq . fst $ x) . closeU $ Node (Seq i ts) (stepReceivers rss) ps l q
+step UnMust (Node (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (tailSeq -> ps) l q) 
+        = Transmit (Chan c) (tailSeq . fst $ x) . closeU $ Node (Seq i ts) (stepReceivers rss) ps l q
 --  time to listen on a receiving seq
-step UnMust (Node (dropSeq -> ts) 
+step UnMust (Node (tailSeq -> ts) 
                 (select (isJust . head . core . fst) -> Just ((Seq i (Just c:xs),n),g)) 
-                (dropSeq -> ps) l q) = Receive (Chan c) f where
+                (tailSeq -> ps) l q) = Receive (Chan c) f where
         new k = Node ts (stepReceivers $ g (Seq i $ Just c : xs,k)) ps l q
         f Nothing = closeU $ new $ n - 1
         f (Just s) = closeU $ insertSeq s . new $ 0
 -- time to transmit on common chan our transmit seq, setting the duty to listen right after
-step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (Seq i (True:ps)) l q) = Transmit Common ts $ close MustReceive $ Node ts rss (Seq i ps) l q
+step UnMust (Node (tailSeq -> ts) (stepReceivers -> rss) (Seq i (True:ps)) l q) = Transmit Common ts $ close MustReceive $ Node ts rss (Seq i ps) l q
 -- time to receive freely on common channel
-step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l (id &&& (l ||) -> (q,True))) = Receive Common f where
+step UnMust (Node (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l (id &&& (l ||) -> (q,True))) = Receive Common f where
         f Nothing = closeU $ Node ts rss ps l q
         f (Just s) =  close (if l then MustTransmit else UnMust) $ (if q then insertSeq s else id) $ Node ts rss ps l q
 -- time to sleep
-step UnMust (Node (dropSeq -> ts) (stepReceivers -> rss) (dropSeq -> ps) l q) = Sleep . closeU $ Node ts rss ps l q
+step UnMust (Node (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q) = Sleep . closeU $ Node ts rss ps l q
 
 -- boot a node
 mkStep :: Node -> Step
