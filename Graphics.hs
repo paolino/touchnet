@@ -41,11 +41,14 @@ main
         playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
                 25
-                (mkWorld 10 30 10 25,Nothing)
-		(render)
+                (mkWorld 15 30 10 20,Nothing)
+		(\w@(World t _,_) -> do 
+                        atomically $ writeTVar runs t
+                        render w
+                        )
                 (\e -> handle e)
                 (\_ (w@(World t _),p) -> do
-                        atomically $ writeTVar runs t
+                        --atomically $ writeTVar runs t
                         return (stepWorld modNode w,p)
                         )
 
@@ -63,7 +66,7 @@ form (Sleep _) = line $ regular 5
 
 
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
-unzot (px,py) = (px * 800 - 400, py *600 - 300)
+unzot (px,py) = (px * 800 - 400, py * 600 - 300)
 handle (EventMotion (zot -> p)) (World i xs,Just k) = let
         Just (Close (Node _ ts rss ps l q w) f , rm) = select ((==k) . key . transmit . inspect) xs
         in return (World i $ rm (Close (Node p ts rss ps l q w) f) ,Just k)
@@ -89,7 +92,7 @@ render (World t xs,_) = let
                                 $ line (map unzot $ triangolo p $ pos (key . fst $ r))) rs)  $ map (load &&& receives) . map fst $ ns)
                 
 cl r    | r == 0 = makeColor 0 1 1 1
-        | otherwise = makeColor 0 0 (1 - fromIntegral (negate r)/3)  1
+        | otherwise = makeColor 0 0 (1 - fromIntegral (negate r)/5)  1
 cn False False = white
 cn True False = yellow
 cn False True = blue

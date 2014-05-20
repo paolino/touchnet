@@ -99,7 +99,7 @@ insertSeq :: Seq MF -> Key -> Node a -> Node a
 insertSeq s@(Seq k1 _) k (Node a ts rss ps l q m) 
                 | s `elem` (ts:map fst rss)     = Node a ts rss ps l q m'
                 | otherwise                     = Node a ts ((s,-1) : rss) ps l q m'
-        where m' = S.insert (k,k1)  m
+        where m' = m
 
 -- | Stepping state
 data Cond = MustTransmit | MustReceive | UnMust
@@ -117,19 +117,19 @@ step :: Cond -> Node a -> Step  a
 -- Obliged to listen in the common chan after a publ
 step MustReceive (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Receive a Common f where
         f Nothing = closeU (Node a ts rss ps l q m)  
-        f (Just s) = closeU (insertSeq s (key s) $ Node a ts rss ps l q m)  
+        f (Just s) = close (if l then MustTransmit else UnMust) (insertSeq s (key s) $ Node a ts rss ps l q m)  
 -- try to publ on a sync window on link channel
 step MustTransmit (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Transmit Common ts . closeU $ Node a ts rss ps l q m
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
 step UnMust (Node a (Seq i (Just c:ts)) (id &&& filter ((==0) . snd) -> (rss,[])) (tailSeq -> ps) l q m)  
         = Transmit (Chan c) (Seq i ts) . closeU $ Node a (Seq i ts) (roll $ stepReceivers rss) ps l q m 
-step UnMust (Node a (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (tailSeq -> ps) l q m) 
+step UnMust (Node a (Seq i (Just c:ts)) (head . filter ((==0) . snd) &&& roll -> (x,rss)) (tailSeq -> ps) l q m) 
         = Transmit (Chan c) (tailSeq . fst $ x) . closeU $ Node a (Seq i ts) (stepReceivers rss) ps l q m
 --  time to listen on a receiving seq
 step UnMust (Node a (tailSeq -> ts) 
-                (select (isJust . head . core . fst) -> Just ((Seq i (Just c:xs),n),g)) 
+                (select (isJust . head . core . fst) -> Just ((Seq i (Just c : xs),n),g)) 
                 (tailSeq -> ps) l q m) = Receive a (Chan c) f where
-        new k = Node a ts (stepReceivers $ g (Seq i $ Just c : xs,k)) ps l q m
+        new k = Node a ts (stepReceivers $ g (Seq i (Just c : xs),k)) ps l q m
         f Nothing = closeU $ new $ n - 1
         f (Just s) = closeU $ insertSeq s i. new $ 0
 -- time to transmit on common chan our transmit seq, setting the duty to listen right after
@@ -165,9 +165,8 @@ mkNode  :: Int -- ^ node unique id
         -> Int -- ^ mean delta between data transmission
         -> Int -- ^ mean delta between self spots
         -> Node Pos
-mkNode ((*5) -> n) chans freq freqC = Node 
-        (fst $ randomR (0,1) (mkStdGen $ 3 + n), 
-                fst $ randomR (0,1) (mkStdGen $ 4 + n))
+mkNode (n) chans freq freqC = Node 
+        (fst . randomR (0,1) $ mkStdGen (n + 3), fst. randomR (0,1) $ mkStdGen (n + 4)) 
         (mkSeq n chans freq)
         []
         (mkBoolSeq (n + 2) freqC)
@@ -196,7 +195,7 @@ resetChiSenteChi n = n{chisentechi = S.empty}
 every j i = i `mod` j == 0
 
 modNode (every 10 -> True) n = resetChiSenteChi n
-modNode _ n@(Node a ts rss ps _ _ w) = Node a ts rss ps ((<3) . length . fst . partitionChiSenteChi $ n) (null rss) w
+modNode _ n@(Node a ts rss ps _ _ w) = forget 5 $ Node a ts rss ps ((<3) . length . fst . partitionChiSenteChi $ n) (null rss) w
 
 
 data World a = World Int [a] deriving (Show)
@@ -221,7 +220,7 @@ stepWorld v (World n cs) = let
 
 -- | create the maxint distinct nodes
 mkWorld :: Int -> Int -> Int -> Int -> World (Close Pos)
-mkWorld z chans freq freqC = World 0 $ take z [Close (mkNode  i chans freq freqC) (step UnMust) | i <- [0..]] where
+mkWorld z chans freq freqC = World 0 $ take z [Close (mkNode  i chans freq freqC) (step UnMust) | i <- [0,10..]] where
        
 
 {-
