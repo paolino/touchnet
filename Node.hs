@@ -98,7 +98,7 @@ stepReceivers = map (first tailSeq)
 insertSeq :: Seq MF -> Key -> Node a -> Node a
 insertSeq s@(Seq k1 _) k (Node a ts rss ps l q m) 
                 | s `elem` (ts:map fst rss)     = Node a ts rss ps l q m'
-                | otherwise                     = Node a ts ((s,0) : rss) ps l q m'
+                | otherwise                     = Node a ts ((s,-1) : rss) ps l q m'
         where m' = S.insert (k,k1)  m
 
 -- | Stepping state
@@ -121,8 +121,8 @@ step MustReceive (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) 
 -- try to publ on a sync window on link channel
 step MustTransmit (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Transmit Common ts . closeU $ Node a ts rss ps l q m
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
-step UnMust (Node a (Seq i (Just c:ts)) [] (tailSeq -> ps) l q m)  
-        = Transmit (Chan c) (Seq i ts) . closeU $ Node a (Seq i ts) [] ps l q m 
+step UnMust (Node a (Seq i (Just c:ts)) (id &&& filter ((==0) . snd) -> (rss,[])) (tailSeq -> ps) l q m)  
+        = Transmit (Chan c) (Seq i ts) . closeU $ Node a (Seq i ts) (roll $ stepReceivers rss) ps l q m 
 step UnMust (Node a (Seq i (Just c:ts)) (head &&& roll -> (x,rss)) (tailSeq -> ps) l q m) 
         = Transmit (Chan c) (tailSeq . fst $ x) . closeU $ Node a (Seq i ts) (stepReceivers rss) ps l q m
 --  time to listen on a receiving seq
@@ -195,12 +195,8 @@ resetChiSenteChi n = n{chisentechi = S.empty}
 
 every j i = i `mod` j == 0
 
-modNode (every 17 -> True) (test partitionChiSenteChi -> (Node a ts rss ps l q w,(< 2) . length . fst -> True)) = Node a ts rss ps True q S.empty
-modNode (every 17 -> True) (test partitionChiSenteChi -> (Node a ts rss ps l q w,(< 2) . length . fst -> False)) = Node a ts rss ps False q S.empty
-modNode (every 23 -> True) n@(Node a ts [] ps l q w)  = Node a ts [] ps l True w
-modNode (every 23 -> True) n@(Node a ts rs ps l q w)  = Node a ts rs ps l False w
-modNode (every 10 -> True) n = forget 4 n
-modNode _ n = n
+modNode (every 10 -> True) n = resetChiSenteChi n
+modNode _ n@(Node a ts rss ps _ _ w) = Node a ts rss ps ((<3) . length . fst . partitionChiSenteChi $ n) (null rss) w
 
 
 data World a = World Int [a] deriving (Show)
