@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 module Node where
 import System.Random (randomR, StdGen, randomRs, mkStdGen)
 import Data.Maybe (catMaybes, isJust)
