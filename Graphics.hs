@@ -104,7 +104,7 @@ scala k (x,y) = (k*x,k*y)
 summa (x1,y1) (x2,y2) = (x1 + x2,y1 + y2)
 diffa (x1,y1) (x2,y2) = (x1 - x2,y1 - y2)
 
-triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1), q', p' `summa` scala 0.03 (dpq' `summa` per2),p' `summa` scala 0.03 (dpq' `summa` per1) ] where
+triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1), p' `summa` scala 0.7 dpq', p' `summa` scala 0.03 (dpq' `summa` per2),p' `summa` scala 0.03 (dpq' `summa` per1) ] where
         (per1,per2) = perp dpq'
         d = distance p q
         r = sqrt (800 ** 2 + 600 ** 2)
