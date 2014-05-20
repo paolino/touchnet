@@ -99,7 +99,7 @@ insertSeq :: Seq MF -> Key -> Node a -> Node a
 insertSeq s@(Seq k1 _) k (Node a ts rss ps l q m) 
                 | s `elem` (ts:map fst rss)     = Node a ts rss ps l q m'
                 | otherwise                     = Node a ts ((s,-1) : rss) ps l q m'
-        where m' = m
+        where m' = S.insert (k,k1) m
 
 -- | Stepping state
 data Cond = MustTransmit | MustReceive | UnMust
@@ -117,9 +117,9 @@ step :: Cond -> Node a -> Step  a
 -- Obliged to listen in the common chan after a publ
 step MustReceive (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Receive a Common f where
         f Nothing = closeU (Node a ts rss ps l q m)  
-        f (Just s) = close (if l then MustTransmit else UnMust) (insertSeq s (key s) $ Node a ts rss ps l q m)  
+        f (Just s) = closeU (insertSeq s (key s) $ Node a ts rss ps l q m)  
 -- try to publ on a sync window on link channel
-step MustTransmit (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Transmit Common ts . closeU $ Node a ts rss ps l q m
+step MustTransmit (Node a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q m) = Transmit Common ts . close MustReceive $ Node a ts rss ps l q m
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
 step UnMust (Node a (Seq i (Just c:ts)) (id &&& filter ((==0) . snd) -> (rss,[])) (tailSeq -> ps) l q m)  
         = Transmit (Chan c) (Seq i ts) . closeU $ Node a (Seq i ts) (roll $ stepReceivers rss) ps l q m 
@@ -195,7 +195,7 @@ resetChiSenteChi n = n{chisentechi = S.empty}
 every j i = i `mod` j == 0
 
 modNode (every 10 -> True) n = resetChiSenteChi n
-modNode _ n@(Node a ts rss ps _ _ w) = forget 5 $ Node a ts rss ps ((<3) . length . fst . partitionChiSenteChi $ n) (null rss) w
+modNode _ n@(Node a ts rss ps _ _ w) = forget 5 $ Node a ts rss ps ((<2) . length . fst . partitionChiSenteChi $ n) ((<2) . length $ rss) w
 
 
 data World a = World Int [a] deriving (Show)

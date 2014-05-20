@@ -40,16 +40,16 @@ main
                 
         playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
-                25
-                (mkWorld 15 30 10 20,Nothing)
-		(\w@(World t _,_) -> do 
+                1
+                (mkWorld 2 30 10 20,Nothing,50)
+		(\w@(World t _,_,_) -> do 
                         atomically $ writeTVar runs t
                         render w
                         )
                 (\e -> handle e)
-                (\_ (w@(World t _),p) -> do
+                (\to (w@(World t _),p,fj) -> seq to $ do
                         --atomically $ writeTVar runs t
-                        return (stepWorld modNode w,p)
+                        return (stepWorld modNode w,p,fj)
                         )
 
 
@@ -67,20 +67,22 @@ form (Sleep _) = line $ regular 5
 
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
 unzot (px,py) = (px * 800 - 400, py * 600 - 300)
-handle (EventMotion (zot -> p)) (World i xs,Just k) = let
+handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
         Just (Close (Node _ ts rss ps l q w) f , rm) = select ((==k) . key . transmit . inspect) xs
-        in return (World i $ rm (Close (Node p ts rss ps l q w) f) ,Just k)
+        in return (World i $ rm (Close (Node p ts rss ps l q w) f) ,Just k,jf)
 
-handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k) = return (stepWorld modNode w,k)
+handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k,jf) = return (stepWorld modNode w,k,jf)
+handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = return (World i $ x:xs,Nothing,fj + 10) where
+        x = closeU $ (mkNode fj 30 10 20){load = p}
 
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_) = let
+handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
         Close (Node _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . load . inspect) xs
-        in return (World i $ xs,Just (key ts))
-handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_) = let
-        in return (World i $ xs,Nothing)
+        in return (World i $ xs,Just (key ts),fj)
+handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
+        in return (World i $ xs,Nothing,fj)
 handle _ x = return x
-render :: (World (Close Pos),Maybe Key) -> IO Picture
-render (World t xs,_) = let
+render :: (World (Close Pos),Maybe Key, Int) -> IO Picture
+render (World t xs,_,_) = let
         ns = map (inspect &&& nodeState) xs 
         pos k = let   
                 Just (load -> p) = find ((==) k . key . transmit) $ map fst ns
