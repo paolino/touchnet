@@ -33,14 +33,14 @@ main
         let f a = do
                 threadDelay 1000000
                 rs <- atomically $ readTVar runs                
-                print $ rs - a
+                -- print $ rs - a
                 f rs
         forkIO $ f 0
                 
                 
         playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
-                1
+                25
                 (mkWorld 2 30 10 20,Nothing,50)
 		(\w@(World t _,_,_) -> do 
                         atomically $ writeTVar runs t
