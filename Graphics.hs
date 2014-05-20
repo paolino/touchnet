@@ -16,7 +16,7 @@ import System.Time
 import Control.DeepSeq
 import Data.List (sortBy)
 import Data.Ord (comparing)
-
+import Control.Arrow
 import Node
 
 main :: IO ()
@@ -45,9 +45,33 @@ handle _ x = return x
 render :: (World (Close Pos),Maybe Key) -> IO Picture
 render (World t xs,_) = let
         ns = map inspect xs 
-        in return $ Pictures $ map (\(x,y) -> color white $ translate (x*800 - 400) (y*600 - 300) $ circle 10 ) . map load $ ns
+        pos k = let   
+                Just (load -> p) = find ((==) k . key . transmit) ns
+                in p 
+        in return $ 
+                Pictures $ 
+                        (map (\((x,y),(col,pub)) -> color (cn col pub) $ translate (x*800 - 400) (y*600 - 300) $ circle 10 ) . map (load &&& collect &&& publicity)   $ ns)
+                        ++ (concatMap (\(p,rs) -> map (\r -> color (makeColor 0 0 (1 - fromIntegral (negate (snd r))/3)  1) 
+                                $ line (map unzot $ triangolo p $ pos (key . fst $ r))) rs)  $ map (load &&& receives) ns)
                 
-                
+
+cn False False = white
+cn True False = yellow
+cn False True = green
+cn True True = red
+perp (x,y) = ((-y,x),(y,-x))
+scala k (x,y) = (k*x,k*y)
+summa (x1,y1) (x2,y2) = (x1 + x2,y1 + y2)
+diffa (x1,y1) (x2,y2) = (x1 - x2,y1 - y2)
+
+triangolo p q = [p',p' `summa` scala 0.01 (dpq' `summa` per1), q', p' `summa` scala 0.01 (dpq' `summa` per2)] where
+        (per1,per2) = perp dpq'
+        d = distance p q
+        r = sqrt (800 ** 2 + 600 ** 2)
+        dpq = diffa q p
+        p' = p `summa` scala (11/r/d) dpq 
+        q' = q `diffa` scala (11/r/d) dpq 
+        dpq' = diffa q' p'
 
 
 

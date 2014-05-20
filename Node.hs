@@ -149,7 +149,12 @@ mkStep = Sleep . close UnMust
 mkBoolSeq :: Int -> Int -> Seq Bool
 mkBoolSeq n freq = Seq n $ map (==0) $ randomRs (0,freq) $ mkStdGen n
 
-mkSeq :: Int -> Int -> Int -> Seq MF
+
+-- | pseudo random sequence of Nothing and Just Freq
+mkSeq   :: Int  -- ^ identifier, random seed
+        -> Int  -- ^ channel space power
+        -> Int  -- ^ mean delta between positives
+        -> Seq MF
 mkSeq n chans freq = let
         Seq _ fs = mkBoolSeq n freq
         cs = randomRs (0,chans) $ mkStdGen $ n + 1
@@ -181,15 +186,19 @@ forget n (Node a ts rss ps l q m) = Node a ts (filter ((> negate n) . snd) rss) 
 partitionChiSenteChi :: Node a -> ([Key], [Key])
 partitionChiSenteChi (Node a s _ _ _ _ m) = (map fst . S.toList *** map fst . S.toList) . S.partition ((== key s) . snd) $ m
 
+test :: (a -> b) -> a -> (a,b)
 test f = id &&& f
+
 -- | empty the chisentechi bin
 resetChiSenteChi :: Node a -> Node a
 resetChiSenteChi n = n{chisentechi = S.empty}
 
 every j i = i `mod` j == 0
 
-modNode (every 17 -> True) (test partitionChiSenteChi -> (Node a ts rss ps l q w,(< 3) . length . fst -> True)) = Node a ts rss ps True q S.empty
+modNode (every 17 -> True) (test partitionChiSenteChi -> (Node a ts rss ps l q w,(< 2) . length . fst -> True)) = Node a ts rss ps True q S.empty
+modNode (every 17 -> True) (test partitionChiSenteChi -> (Node a ts rss ps l q w,(< 2) . length . fst -> False)) = Node a ts rss ps False q S.empty
 modNode (every 23 -> True) n@(Node a ts [] ps l q w)  = Node a ts [] ps l True w
+modNode (every 23 -> True) n@(Node a ts rs ps l q w)  = Node a ts rs ps l False w
 modNode (every 10 -> True) n = forget 4 n
 modNode _ n = n
 
