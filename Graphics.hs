@@ -40,7 +40,7 @@ main
                 
         playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
-                35
+                45
                 (mkWorld 2 30 10 20,Nothing,50)
 		(\w@(World t _,_,_) -> do 
                         atomically $ writeTVar runs t
