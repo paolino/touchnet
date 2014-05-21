@@ -58,7 +58,12 @@ main
 nodeState :: Close a Kolor -> Step a Kolor
 nodeState (Close n f) = f n
 
-data Kolor = Kolor Float Float Float Float deriving (Eq)
+data Kolor = Kolor 
+        { kred::Float
+        , kgreen :: Float
+        , kblue :: Float
+        , kalpha :: Float
+        } deriving (Eq)
 
 nodeKolor (Node ms _ _ _ _ _ _ _) = let 
         (Kolor r g b a,k) = foldr (\(Message n (Kolor r g b a)) (Kolor r1 g1 b1 a1, m) -> (
@@ -77,7 +82,12 @@ form (Receive _ Common _) = polygon $ regular 4
 form (Receive _ _ _) = line $ regular 4
 form (Sleep _) = line $ regular 5
 
-
+bestR f [] = Kolor 0 0 0 1
+bestR f xs  = (\(Message i (Kolor r b g a)) -> Kolor (f r) b g a) . maximumBy (comparing (kred . message)) $ xs
+bestG f [] = Kolor 0 0 0 1
+bestG f xs = (\(Message i (Kolor r b g a)) -> Kolor r (f b) g a) . maximumBy (comparing (kgreen . message)) $ xs
+bestB f [] = Kolor 0 0 0 1
+bestB f xs = (\(Message i (Kolor r b g a)) -> Kolor r b (f g) a) . maximumBy (comparing (kblue . message)) $ xs
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
 unzot (px,py) = (px * 800 - 400, py * 600 - 300)
 handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
@@ -86,23 +96,23 @@ handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
 
 handle (EventKey (MouseButton RightButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
         Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ Kolor 0 0 1 1) $ store n}
+        n' = n {store = insertMessage (Just $ bestB (\x -> (1 + x)/2) (store n)) $ store n}
         in return (World i $ Close n' f : xs',Nothing,jf)
 handle (EventKey (MouseButton LeftButton) Down (Modifiers Down Up _) (zot -> p)) (World i xs,Nothing,jf) =  let
         Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ Kolor 1 0 0 1) $ store n}
+        n' = n {store = insertMessage (Just $ bestG (\x -> (1 + x)/2) (store n)) $ store n}
         in return (World i $ Close n' f : xs',Nothing,jf)
 
 handle (EventKey (MouseButton MiddleButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
         Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ Kolor 0 1 0 1) $ store n}
+        n' = n {store = insertMessage (Just $ bestR (\x -> (1 + x)/2) (store n)) $ store n}
         in return (World i $ Close n' f : xs',Nothing,jf)
 
 
 handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k,jf) = return (stepWorld modNode w,k,jf)
 
 handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = return (World i $ x:xs,Nothing,fj + 10) where
-        x = closeU $ (\(Node _ a ts rss ps l q w) -> Node [Message 1 (Kolor 1 0 1 1)] a ts rss ps l q w) $ (mkNode fj 30 10 20){load = p}
+        x = closeU $ (\(Node _ a ts rss ps l q w) -> Node [Message 1 (Kolor 0 1 0 1)] a ts rss ps l q w) $ (mkNode fj 30 10 20){load = p}
 
 handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
         Close (Node ms _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . load . inspect) xs

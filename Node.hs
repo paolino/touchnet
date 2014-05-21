@@ -153,7 +153,7 @@ step UnMust (Node ms a (Seq i (Just c:ts)) (head . filter ((==0) . snd) &&& roll
 step UnMust (Node ms a (tailSeq -> ts) 
                 (select (isJust . head . core . fst) -> Just ((Seq i (Just c : xs),n),g)) 
                 (tailSeq -> ps) l q chi) = Receive a (Chan c) f where
-        new m k = Node (take 10 $ insertMessage m ms) a ts (stepReceivers $ g (Seq i (Just c : xs),k)) ps l q chi
+        new m k = Node (insertMessage m ms) a ts (stepReceivers $ g (Seq i (Just c : xs),k)) ps l q chi
         f Nothing = closeU $ new Nothing $ n - 1
         f (Just (s,m)) = closeU $ insertSeq s i. new m $ 0
 -- time to transmit on common chan our transmit seq, setting the duty to listen right after
