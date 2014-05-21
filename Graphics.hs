@@ -53,11 +53,24 @@ main
                         )
 
 
-nodeState :: Close a -> Step a
+
+
+nodeState :: Close a Kolor -> Step a Kolor
 nodeState (Close n f) = f n
 
+data Kolor = Kolor Float Float Float Float deriving (Eq)
+
+nodeKolor (Node ms _ _ _ _ _ _ _) = let 
+        (Kolor r g b a,k) = foldr (\(Message n (Kolor r g b a)) (Kolor r1 g1 b1 a1, m) -> (
+                Kolor (fromIntegral n  * r + r1) (fromIntegral n  * g + g1) (fromIntegral n  * b + b1) (fromIntegral n * a + a1),m + n)
+                ) (Kolor 0 0 0 0,0) ms
+        in case k of
+                0 -> makeColor 1 1 1 1
+                k -> makeColor (r / fromIntegral k) (g/fromIntegral k) (b/fromIntegral k) (a/fromIntegral k)
+
 regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
-form :: Step Pos -> Picture
+
+form :: Step Pos Kolor -> Picture
 form (Transmit Common _ _) =  polygon $ regular 3
 form (Transmit _ _ _) =  line $ regular 3
 form (Receive _ Common _) = polygon $ regular 4
@@ -68,20 +81,36 @@ form (Sleep _) = line $ regular 5
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
 unzot (px,py) = (px * 800 - 400, py * 600 - 300)
 handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
-        Just (Close (Node _ ts rss ps l q w) f , rm) = select ((==k) . key . transmit . inspect) xs
-        in return (World i $ rm (Close (Node p ts rss ps l q w) f) ,Just k,jf)
+        Just (Close (Node ms _ ts rss ps l q w) f , rm) = select ((==k) . key . transmit . inspect) xs
+        in return (World i $ rm (Close (Node ms p ts rss ps l q w) f) ,Just k,jf)
+
+handle (EventKey (MouseButton RightButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
+        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
+        n' = n {store = insertMessage (Just $ Kolor 0 0 1 1) $ store n}
+        in return (World i $ Close n' f : xs',Nothing,jf)
+handle (EventKey (MouseButton LeftButton) Down (Modifiers Down Up _) (zot -> p)) (World i xs,Nothing,jf) =  let
+        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
+        n' = n {store = insertMessage (Just $ Kolor 1 0 0 1) $ store n}
+        in return (World i $ Close n' f : xs',Nothing,jf)
+
+handle (EventKey (MouseButton MiddleButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
+        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
+        n' = n {store = insertMessage (Just $ Kolor 0 1 0 1) $ store n}
+        in return (World i $ Close n' f : xs',Nothing,jf)
+
 
 handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k,jf) = return (stepWorld modNode w,k,jf)
+
 handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = return (World i $ x:xs,Nothing,fj + 10) where
-        x = closeU $ (mkNode fj 30 10 20){load = p}
+        x = closeU $ (\(Node _ a ts rss ps l q w) -> Node [Message 1 (Kolor 1 0 1 1)] a ts rss ps l q w) $ (mkNode fj 30 10 20){load = p}
 
 handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
-        Close (Node _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . load . inspect) xs
+        Close (Node ms _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . load . inspect) xs
         in return (World i $ xs,Just (key ts),fj)
 handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
         in return (World i $ xs,Nothing,fj)
 handle _ x = return x
-render :: (World (Close Pos),Maybe Key, Int) -> IO Picture
+render :: (World (Close Pos Kolor),Maybe Key, Int) -> IO Picture
 render (World t xs,_,_) = let
         ns = map (inspect &&& nodeState) xs 
         pos k = let   
@@ -89,12 +118,13 @@ render (World t xs,_,_) = let
                 in p 
         in return $ 
                 Pictures $ 
-                        (map (\(((x,y),(col,pub)),f) -> color (cn col pub) $ translate (x*800 - 400) (y*600 - 300) $ f ) . map ((load &&& collect &&& publicity) *** (scale 10 10 . form))   $ ns)
+                        (map (\((n,((x,y),(col,pub))),f) -> color (nodeKolor n ) $ translate (x*800 - 400) (y*600 - 300) $ f ) . map ((id &&& load &&& collect &&& publicity) *** (scale 10 10 . form))   $ ns)
                         ++ (concatMap (\(p,rs) -> map (\r -> color (cl $ snd r) 
                                 $ line (map unzot $ triangolo p $ pos (key . fst $ r))) rs)  $ map (load &&& receives) . map fst $ ns)
                 
 cl r    | r == 0 = makeColor 0 1 1 1
         | otherwise = makeColor 0 0 (1 - fromIntegral (negate r)/5)  1
+
 cn False False = white
 cn True False = yellow
 cn False True = blue
