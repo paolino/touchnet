@@ -9,13 +9,10 @@ import Prelude hiding (mapM, concat, foldr, concatMap, elem, sum)
 import Graphics.Gloss
 import System.Random
 import Graphics.Gloss.Interface.IO.Game hiding (Key)
-import qualified Data.IntMap.Strict as I
-import qualified Data.Map.Strict as M
 import Data.Foldable
 import Data.Traversable
 import qualified Data.Set as S
 import System.Time
-import Control.DeepSeq
 import Data.List (sortBy)
 import Data.Ord (comparing)
 import Control.Arrow
