@@ -7,7 +7,6 @@ import Data.List (lookup, groupBy, sortBy, mapAccumL)
 import Data.Ord (comparing)
 import Data.Function  (on)
 import qualified Data.Set as S
-import PropInv
 -------------------------------------------------------------
 -- | list rolling
 roll :: [a] -> [a]
@@ -20,6 +19,14 @@ select f [] = Nothing
 select f (x:xs) 
         | f x = Just (x,(:xs))
         | otherwise =  fmap (second $ fmap (x:)) $ select f xs
+pick :: (a -> Bool) -> [a] -> Maybe (a,[a])
+pick f [] = Nothing
+pick f (x:xs)
+        | f x = Just (x,xs)
+        | otherwise = fmap (second (x:)) $ pick f xs
+
+toHead f g  = fmap (\(x,xs) -> g x : xs) . pick f 
+
 -------------------------------------------------------------
 
 -- | A radio channel
@@ -65,18 +72,19 @@ instance Eq m => Eq (Message m) where
         (==) = (==) `on` message
 
 
+
 insertMessage :: Eq m => Maybe m -> [Message m] -> [Message m]
 insertMessage Nothing ms = ms
-insertMessage (Just m) ms = case select ((==) $ Message 0 m) ms of
-                Nothing -> Message 1 m : ms
-                Just (Message n _, f) -> f $ Message (n + 1) m
+insertMessage (Just m) ms 
+        | Message undefined m `elem` ms = ms
+        | otherwise = Message 1 m : ms
 
 toTransmit :: Int ->  [Message m] -> Maybe m
 toTransmit _ [] = Nothing
-toTransmit i ms = Just . pick (\f-> fst $ randomR (0,f) (mkStdGen i)) $ map (\(Message c m) -> (fromIntegral c :: Float,m)) $ ms
+toTransmit i ms = Just (message $ head ms) 
 
           
--- | the value of sequences 
+-- | the value of sequences Message 1 m : ms
 type MF = Maybe Freq
 
 data  Node a m = Node {
@@ -146,9 +154,9 @@ step MustReceive (Node ms a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> p
 step MustTransmit (Node ms a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q chi) = Transmit Common (ts,Nothing) . close MustReceive $ Node ms a ts rss ps l q chi
 -- time to transmit: we transmit a receiving seq and roll the receiving seqs
 step UnMust (Node ms a (Seq i (Just c:ts)) (id &&& filter ((==0) . snd) -> (rss,[])) (tailSeq -> ps) l q chi)  
-        = Transmit (Chan c) (Seq i ts,toTransmit i ms) . closeU $ Node ms a (Seq i ts) (roll $ stepReceivers rss) ps l q chi 
+        = Transmit (Chan c) (Seq i ts,toTransmit i ms) . closeU $ Node (roll ms) a (Seq i ts) (roll $ stepReceivers rss) ps l q chi 
 step UnMust (Node ms a (Seq i (Just c:ts)) (head . filter ((==0) . snd) &&& roll -> (x,rss)) (tailSeq -> ps) l q chi) 
-        = Transmit (Chan c) (tailSeq . fst $ x,toTransmit i ms) . closeU $ Node ms a (Seq i ts) (stepReceivers rss) ps l q chi
+        = Transmit (Chan c) (tailSeq . fst $ x,toTransmit i ms) . closeU $ Node (roll ms) a (Seq i ts) (stepReceivers rss) ps l q chi
 --  time to listen on a receiving seq
 step UnMust (Node ms a (tailSeq -> ts) 
                 (select (isJust . head . core . fst) -> Just ((Seq i (Just c : xs),n),g)) 
