@@ -30,26 +30,28 @@ main
 -- main = mapM_ print . elems . fmap inspect $ (!!1000) . iterate (stepWorld modNode) $ mkWorld 100 10 3 8
  = 	do
         runs <- newTVarIO 0
+        mex <- newTVarIO $ Kolor 0 0 0 0
         let f a = do
-                threadDelay 1000000
-                rs <- atomically $ readTVar runs                
-                -- print $ rs - a
-                f rs
+                l <- getLine
+                case reads l of
+                        [((r,g,b),_)] -> atomically $ writeTVar mex (Kolor r g b 1)
+                        _ -> return ()
+                f a
         forkIO $ f 0
                 
                 
         playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
                 45
-                (mkWorld 2 30 10 20,Nothing,50)
-		(\w@(World t _,_,_) -> do 
+                (mkWorld 2 30 10 20,Nothing,50,mex)
+		(\w@(World t _,_,_,_) -> do 
                         atomically $ writeTVar runs t
                         render w
                         )
                 (\e -> handle e)
-                (\to (w@(World t _),p,fj) -> seq to $ do
+                (\to (w@(World t _),p,fj,mex) -> seq to $ do
                         --atomically $ writeTVar runs t
-                        return (stepWorld modNode w,p,fj)
+                        return (stepWorld modNode w,p,fj,mex)
                         )
 
 
@@ -65,15 +67,9 @@ data Kolor = Kolor
         , kalpha :: Float
         } deriving (Eq)
 
-nodeKolor (Node ms _ _ _ _ _ _ _) = let 
-        (Kolor r g b a,k) = foldr (\(Message n (Kolor r g b a)) (Kolor r1 g1 b1 a1, m) -> (
-                Kolor (fromIntegral n  * r + r1) (fromIntegral n  * g + g1) (fromIntegral n  * b + b1) (fromIntegral n * a + a1),m + n)
-                ) (Kolor 0 0 0 0,0) ms
-        in case k of
-                0 -> makeColor 1 1 1 1
-                k -> makeColor (r / fromIntegral k) (g/fromIntegral k) (b/fromIntegral k) (a/fromIntegral k)
+        
+        
 
-regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 
 form :: Step Pos Kolor -> Picture
 form (Transmit Common _ _) =  polygon $ regular 3
@@ -82,55 +78,56 @@ form (Receive _ Common _) = polygon $ regular 4
 form (Receive _ _ _) = line $ regular 4
 form (Sleep _) = line $ regular 5
 
-bestR f [] = Kolor 0 0 0 1
-bestR f xs  = (\(Message i (Kolor r b g a)) -> Kolor (f r) b g a) . maximumBy (comparing (kred . message)) $ xs
-bestG f [] = Kolor 0 0 0 1
-bestG f xs = (\(Message i (Kolor r b g a)) -> Kolor r (f b) g a) . maximumBy (comparing (kgreen . message)) $ xs
-bestB f [] = Kolor 0 0 0 1
-bestB f xs = (\(Message i (Kolor r b g a)) -> Kolor r b (f g) a) . maximumBy (comparing (kblue . message)) $ xs
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
 unzot (px,py) = (px * 800 - 400, py * 600 - 300)
-handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
+
+handle :: Event -> (World (Close Pos Kolor),Maybe Key,Int,TVar Kolor) -> IO (World (Close Pos Kolor),Maybe Key,Int,TVar Kolor)
+handle (EventMotion (zot -> p)) (World i xs,Just k,jf,mex) = let
         Just (Close (Node ms _ ts rss ps l q w) f , rm) = select ((==k) . key . transmit . inspect) xs
-        in return (World i $ rm (Close (Node ms p ts rss ps l q w) f) ,Just k,jf)
+        in return (World i $ rm (Close (Node ms p ts rss ps l q w) f) ,Just k,jf,mex)
 
-handle (EventKey (MouseButton RightButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
-        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ bestB (\x -> (1 + x)/2) (store n)) $ store n}
-        in return (World i $ Close n' f : xs',Nothing,jf)
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Down Up _) (zot -> p)) (World i xs,Nothing,jf) =  let
-        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ bestG (\x -> (1 + x)/2) (store n)) $ store n}
-        in return (World i $ Close n' f : xs',Nothing,jf)
-
-handle (EventKey (MouseButton MiddleButton) Down (Modifiers Down Up Up) (zot -> p)) (World i xs,Nothing,jf) = let
-        Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
-        n' = n {store = insertMessage (Just $ bestR (\x -> (1 + x)/2) (store n)) $ store n}
-        in return (World i $ Close n' f : xs',Nothing,jf)
+handle (EventKey (MouseButton MiddleButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,Nothing,jf,mex) = do  
+        r <- atomically $ readTVar mex
+        let     Close n  f : xs' = sortBy (comparing $ distance p . load . inspect) xs
+                n' = n {store = insertMessage (Just r) $ store n}
+        return (World i $ Close n' f : xs',Nothing,jf,mex)
 
 
-handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k,jf) = return (stepWorld modNode w,k,jf)
+handle (EventKey (SpecialKey KeySpace) Down (Modifiers Up Up Up) (zot -> p)) (w,k,jf,mex) = return (stepWorld modNode w,k,jf,mex)
 
-handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = return (World i $ x:xs,Nothing,fj + 10) where
+handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj,mex) = return (World i $ x:xs,Nothing,fj + 10,mex) where
         x = closeU $ (\(Node _ a ts rss ps l q w) -> Node [Message 1 (Kolor 0 1 0 1)] a ts rss ps l q w) $ (mkNode fj 30 10 20){load = p}
 
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
+handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj,mex) = let
         Close (Node ms _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . load . inspect) xs
-        in return (World i $ xs,Just (key ts),fj)
-handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
-        in return (World i $ xs,Nothing,fj)
+        in return (World i $ xs,Just (key ts),fj,mex)
+
+handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj,mex) = let
+        in return (World i $ xs,Nothing,fj,mex)
+
 handle _ x = return x
-render :: (World (Close Pos Kolor),Maybe Key, Int) -> IO Picture
-render (World t xs,_,_) = let
-        ns = map (inspect &&& nodeState) xs 
+
+regular :: Int -> [(Float,Float)]
+regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
+
+fromKolor (Kolor r g b a) = makeColor r g b a
+
+nodePicture (Node ms (x0,y0) _ _ _ _ _ _) = let
+        l = length ms
+        ns = regular l
+        in translate x0 y0 . scale 20 20 $ Pictures [color (fromKolor n) . translate x y $ circle (1/(fromIntegral l + 1)) | ((x,y),Message _ n) <- zip ns ms]
+
+render :: (World (Close Pos Kolor),Maybe Key, Int, TVar Kolor) -> IO Picture
+render (World t xs,_,_,_) = let
+        ns = map (inspect) xs 
         pos k = let   
-                Just (load -> p) = find ((==) k . key . transmit) $ map fst ns
+                Just (load -> p) = find ((==) k . key . transmit) $ ns
                 in p 
-        in return $ 
-                Pictures $ 
-                        (map (\((n,((x,y),(col,pub))),f) -> color (nodeKolor n ) $ translate (x*800 - 400) (y*600 - 300) $ f ) . map ((id &&& load &&& collect &&& publicity) *** (scale 10 10 . form))   $ ns)
-                        ++ (concatMap (\(p,rs) -> map (\r -> color (cl $ snd r) 
-                                $ line (map unzot $ triangolo p $ pos (key . fst $ r))) rs)  $ map (load &&& receives) . map fst $ ns)
+        in return . Pictures $ 
+                (map (\((n,((x,y),(col,pub))),f) -> 
+                        translate (x*800 - 400) (y*600 - 300) $ f ) . map ((id &&& load &&& collect &&& publicity) &&& nodePicture)   $ ns)
+                ++ (concatMap (\(p,rs) -> 
+                        map (\r -> color (cl $ snd r) $ line (map unzot $ triangolo p $ pos (key . fst $ r))) rs) . map (load &&& receives) $ ns)
                 
 cl r    | r == 0 = makeColor 0 1 1 1
         | otherwise = makeColor 0 0 (1 - fromIntegral (negate r)/5)  1
