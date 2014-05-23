@@ -57,7 +57,7 @@ executable touchnet
   -- other-extensions:    
   
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.6 && <4.8, stm, gloss,old-time,random,containers,cmdargs
+  build-depends:       base >=4.6 && <4.8, stm, gloss,old-time,random,containers,cmdargs,lens
   
   -- Directories containing source files.
   -- hs-source-dirs:      
