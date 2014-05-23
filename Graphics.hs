@@ -95,7 +95,7 @@ regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 
 nodePicture (Node _ ms (x0,y0) _ _ _ _ _ _) = translate x0 y0 . scale 20 20 $ Pictures  $
 
-                [color white $ scale 0.01 0.01 $ text $ sort . map ((\(Letter c) -> c) . view message)  $ ms]
+                [color white $ scale 0.005 0.007 $ text $ sort . map ((\(Letter c) -> c) . view message)  $ ms]
 
 render :: (World (Close Pos Letter),Maybe Key, Int) -> IO Picture
 render (World t xs,_,_) = let
@@ -104,15 +104,13 @@ render (World t xs,_,_) = let
                 Just (view load -> p) = find ((==) k . view (transmit . key)) $ ns
                 in p 
         in return . Pictures $ 
-                [translate (-400) (-200) $ scale 0.2 0.2 $ color (makeColor 0.3 0.3 0.3 0.3) $ Text "mouse left : move node"] ++ 
-                [translate (-400) (-250) $ scale 0.2 0.2 $ color (makeColor 0.3 0.3 0.3 0.3) $ Text "mouse right : add node"] ++ 
                 (map (\((n,((x,y),(col,pub))),f) -> 
                         translate (x*800 - 400) (y*600 - 300) $ f ) . map ((id &&& _load &&& _collect &&& _publicity) &&& nodePicture)   $ ns)
                 ++ (concatMap (\(p,rs) -> 
                         map (\r -> color (cl $ snd r) $ line (map unzot $ triangolo p $ pos (view key . fst $ r))) rs) . map (_load &&& _receives) $ ns)
                 
-cl r    | r == 0 = makeColor 1 0 0 1
-        | otherwise = makeColor 0 0 ((1 - fromIntegral (negate r)/5)/2)  1
+cl r    | r == 0 = makeColor 1 0 0 0.3
+        | otherwise = makeColor 0 0 ((1 - fromIntegral (negate r)/5)/2)  0.4
 
 
 triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1)
