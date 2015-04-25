@@ -27,7 +27,7 @@ sample = Configuration
         {       frames = def &= help "number of frames per second" &= opt (25 :: Int)
         ,       txfrequency = def &= help "mean delta in frames between node transmission events" &= opt (10 :: Int)
         ,       pufrequency = def &= help "mean delta in frames between node self publicity events" &= opt (20 :: Int)
-        ,       rodfrequency = def &= help "mean delta in frames between node fact roduction event" &= opt (20 :: Int)
+        ,       rodfrequency = def &= help "mean delta in frames between node fact production event" &= opt (20 :: Int)
         ,       memory = def &= help "node fact memory capcacity" &= opt (5 :: Int)
         ,       numchannels = def &= help "channel diversity" &= opt (30 :: Int)
         ,       lmessagettl = def &= help "message time to live" &= opt (50::Int)
@@ -48,15 +48,6 @@ main = 	do
                         return (stepWorld (\x -> (< appargs args) . distance x)  modNode w,p,fj)
                         )
 
-nodeState :: Close a Kolor -> Step a Kolor
-nodeState (Close n f) = f n
-
-data Kolor = Kolor 
-        { kred::Float
-        , kgreen :: Float
-        , kblue :: Float
-        , kalpha :: Float
-        } deriving (Eq, Ord)
 data Letter = Letter Char deriving (Eq, Ord)
 
 zot (px,py) = ((px + 400)/800,(py + 300)/600)
@@ -93,19 +84,24 @@ regular :: Int -> [(Float,Float)]
 regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 
 
-nodePicture (Node _ ms (x0,y0) _ _ _ _ _ _) = translate x0 y0 . scale 20 20 $ Pictures  $
-
-                [color white $ scale 0.005 0.007 $ text $ sort . map ((\(Letter c) -> c) . view message)  $ ms]
+nodePicture (Node _  ms (x0,y0) _ _ _ _ _ _, Sleep _) = translate x0 y0 . scale 20 20 $ Pictures  $
+                [color white $ scale 0.005 0.007 $ text $ map ((\(Letter c) -> c) . view message)  $ ms]
+nodePicture (Node _  ms (x0,y0) _ _ _ _ _ _, Receive _ _ _) = translate x0 y0 . scale 20 20 $ Pictures  $
+                [color green $ scale 0.005 0.007 $ text $ map ((\(Letter c) -> c) . view message)  $ ms]
+nodePicture (Node _  ms (x0,y0) _ _ _ _ _ _, Transmit _ _ _) = translate x0 y0 . scale 20 20 $ Pictures  $
+                [color red $ scale 0.005 0.007 $ text $ map ((\(Letter c) -> c) . view message)  $ ms]
 
 render :: (World (Close Pos Letter),Maybe Key, Int) -> IO Picture
 render (World t xs,_,_) = let
         ns = map (view node) xs 
+        zs = map (\(Close n f) -> f n) xs
+        
         pos k = let   
                 Just (view load -> p) = find ((==) k . view (transmit . key)) $ ns
                 in p 
         in return . Pictures $ 
-                (map (\((n,((x,y),(col,pub))),f) -> 
-                        translate (x*800 - 400) (y*600 - 300) $ f ) . map ((id &&& _load &&& _collect &&& _publicity) &&& nodePicture)   $ ns)
+                (map (\(p,f) -> uncurry translate (unzot p) $ f ) . map (_load . fst &&& nodePicture)   $ zip ns zs)
+                
                 ++ (concatMap (\(p,rs) -> 
                         map (\r -> color (cl $ snd r) $ line (map unzot $ triangolo p $ pos (view key . fst $ r))) rs) . map (_load &&& _receives) $ ns)
                 

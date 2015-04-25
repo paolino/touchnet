@@ -184,10 +184,10 @@ step UnMust (Node (tailSeq -> hs) (decTimeds -> ms) a (tailSeq -> ts)
         new m k = Node hs (insertMessage m ms) a ts (stepReceivers $ g (Seq i (Just c : xs),k)) ps l q chi
         f Nothing = closeU $ new Nothing $ n - 1
         f (Just (s,m)) = closeU $ insertSeq s i. new m $ 0
--- time to transmit on common chan our transmit seq, setting the duty to listen right after
 step UnMust (Node (Seq n (Just h:hs)) (decTimeds -> ms) a (tailSeq -> ts) (stepReceivers -> rss) (tailSeq -> ps) l q chi) = Sleep . closeU $ 
          Node (Seq n hs) (insertMessage (Just $ Timed (lmessagettl ?configuration) h) ms) a ts rss ps l q chi
 
+-- time to transmit on common chan our transmit seq, setting the duty to listen right after
 step UnMust (Node (tailSeq -> hs) (decTimeds -> ms) a (tailSeq -> ts) (stepReceivers -> rss) (Seq i (True:ps)) l q chi) = Transmit Common (ts,Nothing) $ close MustReceive $ Node hs ms a ts rss (Seq i ps) l q chi
 -- time to receive freely on common channel
 
@@ -252,7 +252,7 @@ resetChiSenteChi  = set chisentechi S.empty
 
 every j i = i `mod` j == 0
 --------------------------- v^^^^^^^^^^^^^^^^^^^^----------------___
-modNode (every 10 -> True) n = resetChiSenteChi n
+modNode (every 30 -> True) n = resetChiSenteChi n
 modNode _ n@(Node hs ms a ts rss ps _ _ w) = forget 5 $ Node hs ms a ts rss ps ((<2) . length . fst . partitionChiSenteChi $ n) ((<2) . length $ rss) w
 --------------------------------------------------------------------
 
