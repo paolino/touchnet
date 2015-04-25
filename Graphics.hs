@@ -41,11 +41,11 @@ main = 	do
         let ?configuration = args in playIO (InWindow "Zen" (800, 600) (5, 5))
                 0
                 (frames ?configuration)
-                (World 0 [],Nothing,0)
+                (World 0 [], Nothing, 0)
 		render
                 handle
-                (\to (w@(World t _),p,fj) -> seq to $ do
-                        return (stepWorld (\x -> (< appargs args) . distance x)  modNode w,p,fj)
+                (\to (w@(World t _), p, fj) -> seq to $ do
+                        return (stepWorld (\x -> (< appargs args) . distance x)  modNode w, p, fj)
                         )
 
 data Letter = Letter Char deriving (Eq, Ord)
