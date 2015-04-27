@@ -20,7 +20,7 @@ import Stepping
 
 -- | eliminate unresponsive sequences
 forget :: Int -> Node a m -> Node a m
-forget i = over receives (filter ((> i) . snd))
+forget i = over neighbor (filter ((> i) . snd))
 
 -- | switch full listening state
 switchListener :: Node a m -> Node a m
@@ -40,7 +40,7 @@ every j i = i `mod` j == 0
 
 
 modNode (every 30 -> True) n = resetChiSenteChi n
-modNode _ n@(Node hs ms a ts rss ps _ _ w) = forget 5 . switchListener $ Node hs ms a ts rss ps  ((<2) . length $ rss) w
+modNode _ n@(Node hs ms a ts rss ps _ _ w) = over neighbor (filter keepNeighbor) . switchListener $ Node hs ms a ts rss ps  ((<2) . length $ rss) w
 
 data World a m = World 
         Int -- ^ frame count
