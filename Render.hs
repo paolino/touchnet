@@ -90,8 +90,6 @@ main =
 
 
 
-zot (px,py) = ((px + 400)/800,(py + 300)/600)
-unzot (px,py) = (px * 800 - 400, py * 600 - 300)
 {-
 handle :: (?configuration :: Configuration Float) => Event -> (World (Close Pos Letter),Maybe Key,Int) -> IO (World (Close Pos Letter),Maybe Key,Int)
 handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
@@ -123,31 +121,21 @@ handle _ x = return x
 regular :: Int -> [(Float,Float)]
 regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 -}
+renderText c x = translate x0 y0 . scale 20 20 $ Pictures  $ [color c $ scale 0.005 0.007 $ text x]
+
 
 nodePicture :: Positioned (Future Char) -> Picture
 
-nodePicture (Positioned (Future (messages -> ms) (Sleep _)) x0 y0) = translate x0 y0 . scale 20 20 $ Pictures  $
-                [color white $ scale 0.005 0.007 $ text $ ms]
-nodePicture (Positioned (Future (messages -> ms) (Receive _ _)) x0 y0) = translate x0 y0 . scale 20 20 $ Pictures  $
-                [color green $ scale 0.005 0.007 $ text $ ms]
-nodePicture (Positioned (Future (messages -> ms) (Transmit _ _ _)) x0 y0) = translate x0 y0 . scale 20 20 $ Pictures  $
-                [color red $ scale 0.005 0.007 $ text  $ ms]
+nodePicture (Positioned (ms,Sleep _) x0 y0) = renderText white ms
+nodePicture (Positioned (ms, Receive _ _) x0 y0) = renderText blue ms
+nodePicture (Positioned (ms, Transmit _ _ _) x0 y0) = renderText green ms
 
 render :: Graphics -> IO Picture
 render (Graphics (World _ xs) _) = let
-        zs = map applyFuture xs
+	rs = over (traverse . value) (view (node . messages) &&& applyFuture) xs
+	in scale 800 600 $ Pictures $ map nodePicture rs
+	
         
-        pos k = let   
-                Just (view load -> p) = find ((==) k . view (transmit . key)) $ ns
-                in p 
-        in return . Pictures $ 
-                (map (\(p,f) -> uncurry translate (unzot p) $ f ) . map (_load . fst &&& nodePicture)   $ zip ns zs)
-                
-                ++ (concatMap (\(p,rs) -> 
-                        map (\r -> color (cl $ snd r) $ line (map unzot $ triangolo p $ pos (view key . fst $ r))) rs) . map (_load &&& _receives) $ ns)
-                
-cl r    | r == 0 = makeColor 1 0 0 0.3
-        | otherwise = makeColor 0 0 ((1 - fromIntegral (negate r)/5)/2)  0.4
 
 
 triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1)
