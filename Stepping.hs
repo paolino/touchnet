@@ -44,7 +44,7 @@ step MustReceive (Node
         ls
         ) = ReceiveCommon  Common f where
                 f Nothing = close UnMust $ Node hs ms ts rss ps ls
-                f (Just (Publ s)) = close UnMust (addNeighbor (Neighbor s 0) $ Node hs ms  ts rss ps ls) -- doesn't use sync to avoid loop 
+                f (Just (Publ s)) = close UnMust (addNeighbor s $ Node hs ms  ts rss ps ls) -- doesn't use sync to avoid loop 
 
 -- try to publicize transmit seqs on a sync window on common channel, switch to must receive by contract.
 step MustTransmit (Node 
@@ -89,9 +89,9 @@ step UnMust (Node
                 ) = ReceiveFree  (Free $ fromJust . head . view stream $ s) $ close UnMust . f where
                         add n' = clean $ Node hs ms ts (tailNeighbors . g $ Neighbor s n') ps ls
                         f Nothing = add $ n + 1  -- missed appointment
-                        f (Just (Info s' (Just m))) = addMessage m . addNeighbor (Neighbor s' 1) . add $ 0 
+                        f (Just (Info s' (Just m))) = addMessage m . addNeighborOrListener s'  . add $ 0 
                                 -- got it , set to trusted
-                        f (Just (Info s' Nothing)) = addNeighbor (Neighbor s' 1). add $ 0 -- got it , set to trusted
+                        f (Just (Info s' Nothing)) = addNeighborOrListener s'. add $ 0 -- got it , set to trusted
 
 -- insert a personal message with fresh ttl in the message list and sleep
 step UnMust (Node 
@@ -115,7 +115,6 @@ step UnMust (Node
         ls
         ) = TransmitCommon Common (Publ ts) $ close MustReceive $
                  Node hs ms  ts rss (Seq i ps) ls
-
 -- time to receive freely on common channel and use sync to force our presence on the neighbor 
 step UnMust (shouldSync &&& id -> (True, Node 
         (tailSeq -> hs) 
@@ -127,12 +126,10 @@ step UnMust (shouldSync &&& id -> (True, Node
         )) = ReceiveCommon Common f where
                 f Nothing = close UnMust $ Node hs ms  ts rss ps ls
                 f (Just (Publ s)) 
-                        | not (view key s `elem`  ls) = close MustTransmit $ addNeighbor (Neighbor s 0) $ 
+                        | not (view key s `elem`  ls) = close MustTransmit $ addNeighbor s $ 
                                 Node hs ms  ts rss ps ls -- only reply on non publicizing neighbor
-                        | otherwise = close UnMust $ addNeighbor (Neighbor s 0) $ 
+                        | otherwise = close UnMust $ addNeighbor s  $ 
                                 Node hs ms  ts rss ps ls
-
-
 
 -- time to receive freely on common channel, missing neighbors
 step UnMust (shouldListen &&& id -> (True, Node 
@@ -144,7 +141,7 @@ step UnMust (shouldListen &&& id -> (True, Node
         ls
         )) = ReceiveCommon  Common f where
                 f Nothing = close UnMust $ Node hs ms  ts rss ps ls
-                f (Just (Publ s)) =  close UnMust $ addNeighbor (Neighbor s 0) $ Node hs ms  ts rss ps ls
+                f (Just (Publ s)) =  close UnMust $ addNeighbor s $ Node hs ms  ts rss ps ls
 
 -- time to sleep
 step UnMust (Node hs (decTimeds -> ms) (tailSeq -> ts) (tailNeighbors -> rss) (tailSeq -> ps) ls) = 

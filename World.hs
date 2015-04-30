@@ -18,9 +18,6 @@ import List (roll, select)
 import Stepping
 import Positioned
 
-data WorldConfiguration = WorldConfiguration {
-        radiorange :: Float
-        }
 
 data World a m = World {
         _nodes :: [Positioned (a m)] -- 
@@ -33,23 +30,25 @@ stepPat :: Positioned a -> (Positioned a, a)
 stepPat = id &&& view value
 
 -- | compute the futures for state values. Sleep an transitting are just picked out, receivers are fed with a message when present
-stepState :: (?wconf :: WorldConfiguration) => [Positioned (State m)] -> Positioned (State m) -> Positioned (Future m)
+stepState :: Float -> [Positioned (State m)] -> Positioned (State m) -> Positioned (Future m)
 
-stepState _ (stepPat -> (p,Sleep x))                    = set value x p
-stepState _ (stepPat -> (p,TransmitCommon _ _ x))       = set value x p
-stepState _ (stepPat -> (p,TransmitFree _ _ x))         = set value x p
+stepState rr _ (stepPat -> (p,Sleep x))                    = set value x p
+stepState rr _ (stepPat -> (p,TransmitCommon _ _ x))       = set value x p
+stepState rr _ (stepPat -> (p,TransmitFree _ _ x))         = set value x p
 
-stepState xs (stepPat -> (p,ReceiveCommon Common f))    = case isolated (radiorange ?wconf) p (transmittedCommon xs) of
+stepState rr xs (stepPat -> (p,ReceiveCommon Common f))    = case isolated rr p (transmittedCommon xs) of
         Nothing -> set value (f Nothing) p
         Just (view value ->  TransmitCommon _ m _) -> set value (f $ Just m) p
 
-stepState xs (stepPat -> (p,ReceiveFree c f))           = case isolated (radiorange ?wconf) p (transmittedFree c xs) of
+stepState rr xs (stepPat -> (p,ReceiveFree c f))           = case isolated rr p (transmittedFree c xs) of
         Nothing -> set value (f Nothing) p
         Just (view value ->  TransmitFree _ m _) -> set value (f $ Just m) p
 
--- stepping a world of futures by applying the nodes to their continuation and stepping each state
-stepWorld :: (?wconf :: WorldConfiguration) => World Future m -> World Future m
-stepWorld = over nodes $ (flip map <*> stepState) . map (fmap applyFuture)
+-- | stepping a world of futures by applying the nodes to their continuation and stepping each state
+stepWorld 	:: Float  -- ^ radio range
+		-> World Future m 
+		-> World Future m
+stepWorld rr = over nodes $ (flip map <*> stepState rr ) . map (fmap applyFuture)
 
 -- transmitters on common channel
 transmittedCommon ::  [Positioned (State t)] -> [Positioned (State t)]
@@ -69,8 +68,14 @@ remove x y = over nodes $ remove' x y where
         remove' _ _ [] = []
         remove' x y xs = tail . sortBy (comparing (distance (Positioned () x y))) $ xs
 
+-- | remove the nearest to given coordinates node if possible
+nearest :: Float -> Float -> World Future m -> Maybe Key
+nearest x y = fmap (view (value . node . transmit . key)) . nearest' . view nodes where
+        nearest' [] = Nothing
+        nearest' xs = Just . head . sortBy (comparing (distance (Positioned () x y))) $ xs
+
 -- | add a new node at the given coordinates
-add :: (?wconf:: WorldConfiguration, ?nconf:: NodeConfiguration, Eq m) => Float -> Float  -> m -> World Future m -> World Future m
+add :: (?nconf:: NodeConfiguration, Eq m) => Float -> Float  -> m -> World Future m -> World Future m
 add x y m (World zs k) = World (Positioned z x y : zs) k' where
         (k',z) = mkFuture k m
 

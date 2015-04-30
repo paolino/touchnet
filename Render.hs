@@ -2,16 +2,16 @@
 
 
 
-import Positioned
+import Positioned hiding (ord)
 import World
 import Node
 import Stepping
 import Seq
 import Timed
+import List
 
 
-
-
+import Data.Char
 import Control.Concurrent.STM
 import Control.Concurrent hiding (Chan)
 import Prelude hiding (mapM, concat, foldr, concatMap, elem, sum)
@@ -58,89 +58,85 @@ sample = Configuration
          &= summary "Simulation of touchnet protocol"
 -}
 nodeConf = NodeConfiguration {
-        txfrequency = 10, -- ^ transmissions frequency
-        pufrequency = 20, -- ^ pubblicity frequency
-        rodfrequency = 20, -- ^ node self message frequency
+        txfrequency = 20, -- ^ transmissions frequency
+        pufrequency = 100, -- ^ pubblicity frequency
+        rodfrequency = 100, -- ^ node self message frequency
         droplevel = 5, -- ^ max number of consecutive missed listenings before dropping
-        alertlevel = 3, -- ^ minimum number of listeners to stop using sync listening window on common channel
-        neighborlevel = 5, -- ^ minimum number of neighbors to stop listening on common channel
-        memory = 20, -- ^ number of remembered messages
+        alertlevel = 1, -- ^ minimum number of listeners to stop using sync listening window on common channel
+        neighborlevel = 1, -- ^ minimum number of neighbors to stop listening on common channel
+        neighbormemory = 5, -- ^ minimum number of neighbors to stop listening on common channel
+        memory = 10, -- ^ number of remembered messages
         numchannels = 10, -- ^ channel spectrum 
-        lmessagettl = 50 -- ^ message duration in memory
-        }
-worldConf = WorldConfiguration {
-        radiorange = 0.3
+        lmessagettl = 500 -- ^ message duration in memory
         }
 
 
 data Graphics = Graphics {
         _world :: World Future Char,
-        _selected :: Maybe Key
+        _selected :: Maybe Key,
+	_radiorange :: Float,
+	_curname :: Char
         }
+
 makeLenses ''Graphics
 main :: IO ()
 main =         
         -- args <- cmdArgs sample
         let ?nconf = nodeConf
-            ?wconf = worldConf
         in playIO (InWindow "Zen" (800, 600) (5, 5))
                 0 -- color
                 30 -- frames
-                (Graphics (World [] 0) Nothing) -- starting world
+                (Graphics (World [] 0) Nothing 100 'a') -- starting world
                 render -- render world
-                (\_ x -> return x) -- handle events
-                (\_ w -> return $ over world stepWorld w) -- stepworld
+                handle -- handle events
+                (\_ w -> return $ over world (stepWorld (view radiorange w)) w) -- stepworld
 
 
 
 
-handle :: Event -> Graphics -> IO Graphics
-handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
-        Just (Close (Node hs ms _ ts rss ps l q w) f , rm) = select ((==k) . view (node . transmit . key)) xs
-        in return (World i $ rm (Close (Node hs ms p ts rss ps l q w) f) ,Just k,jf)
+handle :: (?nconf :: NodeConfiguration) => Event -> Graphics -> IO Graphics
 
+-- map the movement if a node is selected
+handle (EventMotion p@(x',y')) g@(view selected &&& view (world . nodes) -> (Just k, xs)) = let
+        Just (view value -> z, f) = select ((== k) . view (value . node . transmit . key)) $ xs
+        in return $ set (world . nodes) (f $ Positioned z x' y') g
+
+-- add a new node in mouse position
+handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (x',y')) g = do
+	return $ over curname succ $ over world (add x' y' $ view curname g) g
+
+
+handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (x',y')) g = return $ set selected (nearest x' y' $ view world g) g
+
+handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) _) g = return $ set selected Nothing g
+
+handle _ x = return x
+{-
 
 handle (EventKey (Char c) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,jf) = do  
         let     Close n  f : xs' = sortBy (comparing $ distance p . view (node . load)) xs
                 n' = over roduction (fmap (fmap (const $ Letter c)))  n
         return (World i $ Close n' f : xs',Nothing,jf)
-
-
-
-handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = return (World i $ x:xs,Nothing,fj + 1) where
-        x = closeU $ (\(Node xs _ a ts rss ps l q w) -> Node xs [] a ts rss ps l q w) $ mkNode fj p $ Letter (toEnum $ fromEnum 'a' + fj)
-
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i [],_,fj) = return (World i [],Nothing,fj)
-
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
-        Close (Node hs ms _ ts rss ps l q w) f : _ = sortBy (comparing $ distance p . view (node . load)) xs
-        in return (World i $ xs,Just (view key ts),fj)
-
-handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) (zot -> p)) (World i xs,_,fj) = let
-        in return (World i $ xs,Nothing,fj)
-
-handle _ x = return x
-
 regular :: Int -> [(Float,Float)]
 regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 -}
-renderText c x x0 y0 = translate x0 y0 . scale 20 20 $ Pictures  $ [color c $ scale 0.005 0.007 $ text x]
+renderText rr c x x0 y0 = translate x0 y0  $ Pictures  $ [color (greyN 0.05) $ circle rr, color c $ scale 0.2 0.2 $ text $ sort x]
 
 
-nodePicture :: Positioned (String, State Char) -> Picture
+nodePicture :: Float -> Positioned (String, State Char) -> Picture
 
-nodePicture (Positioned (ms,Sleep _) x0 y0) = renderText white ms x0 y0 
-nodePicture (Positioned (ms, ReceiveFree _ _) x0 y0) = renderText blue ms x0 y0 
-nodePicture (Positioned (ms, ReceiveCommon _ _) x0 y0) = renderText cyan ms x0 y0 
-nodePicture (Positioned (ms, TransmitFree _ _ _) x0 y0) = renderText green ms x0 y0 
-nodePicture (Positioned (ms, TransmitCommon _ _ _) x0 y0) = renderText yellow ms x0 y0 
+nodePicture rr (Positioned (ms,Sleep _) x0 y0) = renderText rr (greyN 0.1) ms x0 y0 
+nodePicture rr (Positioned (ms, ReceiveFree _ _) x0 y0) = renderText rr cyan ms x0 y0 
+nodePicture rr (Positioned (ms, ReceiveCommon _ _) x0 y0) = renderText rr blue ms x0 y0 
+nodePicture rr (Positioned (ms, TransmitFree _ _ _) x0 y0) = renderText rr yellow ms x0 y0 
+nodePicture rr (Positioned (ms, TransmitCommon _ _ _) x0 y0) = renderText  rr red ms x0 y0 
 
 render :: Graphics -> IO Picture
-render (Graphics (World xs _) _) = return $ 
+render (Graphics (World xs _) _ rr _) = return $ 
         let  rs = over (traverse . value) 
                         (map (view message) . view (node . messages) 
                                 &&& applyFuture) xs
-        in scale 800 600 $ Pictures $ map nodePicture rs
+        in Pictures $ map (nodePicture rr) rs
         
         
 

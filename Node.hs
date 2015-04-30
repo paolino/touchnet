@@ -15,6 +15,7 @@ data NodeConfiguration = NodeConfiguration {
         droplevel :: Int, -- ^ max number of consecutive missed listenings before dropping
         alertlevel :: Int, -- ^ minimum number of listeners to stop using sync listening window on common channel
         neighborlevel :: Int, -- ^ minimum number of neighbors to stop listening on common channel
+        neighbormemory :: Int, -- ^ maximum number of neighbor
         memory :: Int, -- ^ number of remembered messages
         numchannels :: Int, -- ^ channel spectrum 
         lmessagettl :: Int -- ^ message duration in memory
@@ -75,19 +76,27 @@ shouldSync n = length (view listeners n) < alertlevel ?nconf
 
 -- | starving for receivers
 shouldListen ::  (?nconf :: NodeConfiguration) => Node m -> Bool
-shouldListen n = length (view neighbors n) < alertlevel ?nconf
+shouldListen n = length (view neighbors n) < neighborlevel ?nconf
 
 -- | eliminate lost neighbors even from listeners (based on simmetric signal property)
 clean ::(?nconf :: NodeConfiguration) => Node m -> Node m
 clean n = let
         (xs,ys) = partition keepNeighbor $ view neighbors  n
-        ls = filter (not . (`elem` map (view $ transmissions . key) xs)) $ view listeners n
-        in set listeners ls . set neighbors ys $ n 
+        ls = filter (not . (`elem` map (view $ transmissions . key) ys)) $ view listeners n
+        in set listeners ls . set neighbors xs $ n 
 
 -- | insert a add neighbor if the sequence key is unknown
-addNeighbor :: (?nconf :: NodeConfiguration) => Neighbor -> Node  m -> Node m
-addNeighbor n = over neighbors $ take (neighborlevel ?nconf) <$>
+addNeighbor' :: (?nconf :: NodeConfiguration) => Neighbor -> Node  m -> Node m
+addNeighbor' n = over neighbors $ take (neighbormemory ?nconf) <$>
         (maybe . (n:) <*> const  <*> find ((== view (transmissions . key) n) . view (transmissions . key)))
+
+addNeighbor :: (?nconf :: NodeConfiguration) => SeqT -> Node  m -> Node m
+addNeighbor s = addNeighbor' (Neighbor s 0)
+
+addNeighborOrListener :: (?nconf :: NodeConfiguration) => SeqT -> Node  m -> Node m
+addNeighborOrListener s n 
+	| view key s == view (transmit . key) n = addListener s n
+	| otherwise = addNeighbor' (Neighbor s 1) n 
 
 -- | insert a add listener
 addListener :: SeqT -> Node  m -> Node m

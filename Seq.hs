@@ -8,7 +8,7 @@ import Data.List (mapAccumL)
 
 
 -- | Sequence identifier
-newtype Key = Key Int deriving (Eq,Show,Num, Ord)
+newtype Key = Key Int deriving (Eq,Show,Num, Ord, Enum)
 
 -- | A sequence is an infinite list of something with an identifier 
 data Seq a = Seq {
