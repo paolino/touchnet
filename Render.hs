@@ -94,8 +94,7 @@ main =
 
 
 
-{-
-handle :: (?configuration :: Configuration Float) => Event -> (World (Close Pos Letter),Maybe Key,Int) -> IO (World (Close Pos Letter),Maybe Key,Int)
+handle :: Event -> Graphics -> IO Graphics
 handle (EventMotion (zot -> p)) (World i xs,Just k,jf) = let
         Just (Close (Node hs ms _ ts rss ps l q w) f , rm) = select ((==k) . view (node . transmit . key)) xs
         in return (World i $ rm (Close (Node hs ms p ts rss ps l q w) f) ,Just k,jf)
