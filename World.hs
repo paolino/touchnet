@@ -19,7 +19,7 @@ import Stepping
 import Positioned
 
 data WorldConfiguration = WorldConfiguration {
-        radiorange :: Double
+        radiorange :: Float
         }
 
 data World a m = World {
@@ -33,22 +33,22 @@ stepPat :: Positioned a -> (Positioned a, a)
 stepPat = id &&& view value
 
 -- | compute the futures for state values. Sleep an transitting are just picked out, receivers are fed with a message when present
-stepState :: (?configuration :: WorldConfiguration) => [Positioned (State m)] -> Positioned (State m) -> Positioned (Future m)
+stepState :: (?wconf :: WorldConfiguration) => [Positioned (State m)] -> Positioned (State m) -> Positioned (Future m)
 
 stepState _ (stepPat -> (p,Sleep x))                    = set value x p
 stepState _ (stepPat -> (p,TransmitCommon _ _ x))       = set value x p
 stepState _ (stepPat -> (p,TransmitFree _ _ x))         = set value x p
 
-stepState xs (stepPat -> (p,ReceiveCommon Common f))    = case isolated (radiorange ?configuration) p (transmittedCommon xs) of
+stepState xs (stepPat -> (p,ReceiveCommon Common f))    = case isolated (radiorange ?wconf) p (transmittedCommon xs) of
         Nothing -> set value (f Nothing) p
         Just (view value ->  TransmitCommon _ m _) -> set value (f $ Just m) p
 
-stepState xs (stepPat -> (p,ReceiveFree c f))           = case isolated (radiorange ?configuration) p (transmittedFree c xs) of
+stepState xs (stepPat -> (p,ReceiveFree c f))           = case isolated (radiorange ?wconf) p (transmittedFree c xs) of
         Nothing -> set value (f Nothing) p
         Just (view value ->  TransmitFree _ m _) -> set value (f $ Just m) p
 
 -- stepping a world of futures by applying the nodes to their continuation and stepping each state
-stepWorld :: (?configuration :: WorldConfiguration) => World Future m -> World Future m
+stepWorld :: (?wconf :: WorldConfiguration) => World Future m -> World Future m
 stepWorld = over nodes $ (flip map <*> stepState) . map (fmap applyFuture)
 
 -- transmitters on common channel
@@ -64,13 +64,13 @@ transmittedFree c = filter (select . view value)   where
         select _ = False
 
 -- | remove the nearest to given coordinates node if possible
-remove :: Double -> Double -> World Future m -> World Future m
+remove :: Float -> Float -> World Future m -> World Future m
 remove x y = over nodes $ remove' x y where
         remove' _ _ [] = []
         remove' x y xs = tail . sortBy (comparing (distance (Positioned () x y))) $ xs
 
 -- | add a new node at the given coordinates
-add :: (?wconf:: WorldConfiguration, ?nconf:: NodeConfiguration, Eq m) => Double -> Double  -> m -> World Future m -> World Future m
+add :: (?wconf:: WorldConfiguration, ?nconf:: NodeConfiguration, Eq m) => Float -> Float  -> m -> World Future m -> World Future m
 add x y m (World zs k) = World (Positioned z x y : zs) k' where
         (k',z) = mkFuture k m
 

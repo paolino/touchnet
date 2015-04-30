@@ -1,10 +1,14 @@
-{-# LANGUAGE ParallelListComp, ViewPatterns, DeriveDataTypeable, ImplicitParams #-}
-module Render where
+{-# LANGUAGE ParallelListComp, ViewPatterns, DeriveDataTypeable, ImplicitParams, TemplateHaskell #-}
 
 
-import Gloss
 
 import Positioned
+import World
+import Node
+import Stepping
+import Seq
+import Timed
+
 
 
 
@@ -20,11 +24,11 @@ import qualified Data.Set as S
 import Data.List (sortBy, sort)
 import Data.Ord (comparing)
 import Control.Arrow
-import Node
 import Control.Monad
 import Data.Typeable
 import System.Console.CmdArgs
 import Control.Lens
+import Control.Lens.TH
 {-
 -- | NodeConfiguration of a node. 
 data NodeConfiguration = NodeConfiguration {
@@ -70,22 +74,22 @@ worldConf = WorldConfiguration {
 
 
 data Graphics = Graphics {
-        _world :: World Char
-        _selected :: Key
+        _world :: World Future Char,
+        _selected :: Maybe Key
         }
-
+makeLenses ''Graphics
 main :: IO ()
-main = 	
+main =         
         -- args <- cmdArgs sample
         let ?nconf = nodeConf
             ?wconf = worldConf
         in playIO (InWindow "Zen" (800, 600) (5, 5))
-                0
-                30
-                (Graphics $ World 0 [])
-		render
-                handle
-                stepWorld
+                0 -- color
+                30 -- frames
+                (Graphics (World [] 0) Nothing) -- starting world
+                render -- render world
+                (\_ x -> return x) -- handle events
+                (\_ w -> return $ over world stepWorld w) -- stepworld
 
 
 
@@ -121,23 +125,27 @@ handle _ x = return x
 regular :: Int -> [(Float,Float)]
 regular n = take (n + 1) $ map (\a -> (cos a,sin a)) [0,2*pi/fromIntegral n..]
 -}
-renderText c x = translate x0 y0 . scale 20 20 $ Pictures  $ [color c $ scale 0.005 0.007 $ text x]
+renderText c x x0 y0 = translate x0 y0 . scale 20 20 $ Pictures  $ [color c $ scale 0.005 0.007 $ text x]
 
 
-nodePicture :: Positioned (Future Char) -> Picture
+nodePicture :: Positioned (String, State Char) -> Picture
 
-nodePicture (Positioned (ms,Sleep _) x0 y0) = renderText white ms
-nodePicture (Positioned (ms, Receive _ _) x0 y0) = renderText blue ms
-nodePicture (Positioned (ms, Transmit _ _ _) x0 y0) = renderText green ms
+nodePicture (Positioned (ms,Sleep _) x0 y0) = renderText white ms x0 y0 
+nodePicture (Positioned (ms, ReceiveFree _ _) x0 y0) = renderText blue ms x0 y0 
+nodePicture (Positioned (ms, ReceiveCommon _ _) x0 y0) = renderText cyan ms x0 y0 
+nodePicture (Positioned (ms, TransmitFree _ _ _) x0 y0) = renderText green ms x0 y0 
+nodePicture (Positioned (ms, TransmitCommon _ _ _) x0 y0) = renderText yellow ms x0 y0 
 
 render :: Graphics -> IO Picture
-render (Graphics (World _ xs) _) = let
-	rs = over (traverse . value) (view (node . messages) &&& applyFuture) xs
-	in scale 800 600 $ Pictures $ map nodePicture rs
-	
+render (Graphics (World xs _) _) = return $ 
+        let  rs = over (traverse . value) 
+                        (map (view message) . view (node . messages) 
+                                &&& applyFuture) xs
+        in scale 800 600 $ Pictures $ map nodePicture rs
+        
         
 
-
+{-
 triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1)
                 , p' `summa` scala 0.8 dpq'
                 , p' `summa` scala 0.03 (dpq' `summa` per2)
@@ -154,5 +162,5 @@ triangolo p q = [p' `summa` scala 0.05 (dpq' `summa` per1)
         summa (x1,y1) (x2,y2) = (x1 + x2,y1 + y2)
         diffa (x1,y1) (x2,y2) = (x1 - x2,y1 - y2)
 
-
+-}
 

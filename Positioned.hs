@@ -8,17 +8,17 @@ import Data.Ord (comparing)
 
 data Positioned a = Positioned {
         _value :: a,
-        _asc :: Double,
-        _ord ::Double 
+        _asc :: Float,
+        _ord ::Float 
         } deriving (Functor)
 
 makeLenses ''Positioned
 
-distance :: Positioned a -> Positioned b -> Double
+distance :: Positioned a -> Positioned b -> Float
 distance (Positioned _ x1 y1)  (Positioned _ x2 y2) = sqrt $ (x1 - x2) ^ 2 + (y1 - y2) ^ 2
 
 -- | compute the only neighbor in sight
-isolated :: Double -> Positioned a -> [Positioned b] -> Maybe (Positioned b)
+isolated :: Float -> Positioned a -> [Positioned b] -> Maybe (Positioned b)
 isolated d x xs = case filter ((<d) . distance x) xs of 
         [y] -> Just y
         _ -> Nothing
