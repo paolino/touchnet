@@ -1,18 +1,20 @@
-{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor #-}
+{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor, DataKinds, KindSignatures, GADTs, PolyKinds #-}
+
 module Node where
 import Control.Lens
 import Control.Arrow (second, first)
-import Data.List (partition)
+import Data.List (partition, delete, find)
 import Timed
 import Seq
 
--- | Configuration of a node. 
-data Configuration = Configuration {
+-- | NodeConfiguration of a node. 
+data NodeConfiguration = NodeConfiguration {
         txfrequency :: Int, -- ^ transmissions frequency
         pufrequency :: Int, -- ^ pubblicity frequency
         rodfrequency :: Int, -- ^ node self message frequency
         droplevel :: Int, -- ^ max number of consecutive missed listenings before dropping
         alertlevel :: Int, -- ^ minimum number of listeners to stop using sync listening window on common channel
+        neighborlevel :: Int, -- ^ minimum number of neighbors to stop listening on common channel
         memory :: Int, -- ^ number of remembered messages
         numchannels :: Int, -- ^ channel spectrum 
         lmessagettl :: Int -- ^ message duration in memory
@@ -22,8 +24,18 @@ data Configuration = Configuration {
 -- | A radio channel
 type Freq = Int
 
+-- | Promoted channel kinds
+data TChan = TCommon | TFree
+
 -- | Separation by construction of the link channel from the data channels
-data Chan = Common | Chan Freq deriving (Eq, Ord)
+data Chan (t :: TChan) where
+        Common :: Chan TCommon
+        Free :: Freq -> Chan TFree
+
+instance Eq (Chan t) where
+        Common == Common = True
+        Free n == Free m = n == m
+        _ == _ = False
 
 -- | sequence specialized for frequencies
 type SeqT = SeqM Freq
@@ -31,70 +43,98 @@ type SeqT = SeqM Freq
 -- | vision of a neighbor node 
 data Neighbor = Neighbor {
         _transmissions :: SeqT, -- ^ neighbor transmission sequence
-        _misseds :: Int -- ^ count of missed listenings (out of reach)
+        _misseds :: Int -- ^ count of missed listenings (out of reach), very improbable idea to bring to hardware
         }
 
 makeLenses ''Neighbor
 
 -- | check if a neighbor is still interesting
-keepNeighbor :: (?configuration :: Configuration) => Neighbor -> Bool
-keepNeighbor x = view misseds x < droplevel ?configuration
+keepNeighbor :: (?nconf :: NodeConfiguration) => Neighbor -> Bool
+keepNeighbor x = view misseds x < droplevel ?nconf
 
-
-
+-- | let heads go from neighbors
+tailNeighbors :: [Neighbor] -> [Neighbor]
+tailNeighbors = map (over transmissions tailSeq)
 
 -- | Node m is the message type
 data  Node m = Node {
         _production :: SeqM m, -- ^ fake random self message
-        _store :: [Timed m], -- ^ memory of received messages
+        _messages :: [Timed m], -- ^ memory of received messages
         _transmit :: SeqT,  -- ^ transmitting sequence 
-        _receives :: [Neighbor] , -- ^ set of receiving sequences 
+        _neighbors :: [Neighbor] , -- ^ set of receiving sequences 
         _contract :: Seq Bool, -- ^ self spot sequence
         _listeners :: [Key] -- ^ listeners
         } 
 
 makeLenses ''Node
 
--- | let heads go from receives
-tailReceives :: [Neighbor] -> [Neighbor]
-tailReceives = map (over transmissions tailSeq)
 
 -- | starving for listeners 
-shouldSync :: (?configuration :: Configuration) => Node m -> Bool
-shouldSync n = length (view listeners n) < alertlevel ?configuration
+shouldSync :: (?nconf :: NodeConfiguration) => Node m -> Bool
+shouldSync n = length (view listeners n) < alertlevel ?nconf
 
 -- | starving for receivers
-shouldListen ::  (?configuration :: Configuration) => Node m -> Bool
-shouldListen n = length (view receives n) < alertlevel ?configuration
+shouldListen ::  (?nconf :: NodeConfiguration) => Node m -> Bool
+shouldListen n = length (view neighbors n) < alertlevel ?nconf
 
--- | eliminate lost neighbors even from listeners
-clean ::(?configuration :: Configuration) => Node m -> Node m
+-- | eliminate lost neighbors even from listeners (based on simmetric signal property)
+clean ::(?nconf :: NodeConfiguration) => Node m -> Node m
 clean n = let
-        (xs,ys) = partition keepNeighbor $ view receives  n
+        (xs,ys) = partition keepNeighbor $ view neighbors  n
         ls = filter (not . (`elem` map (view $ transmissions . key) xs)) $ view listeners n
-        in set listeners ls . set receives ys $ n 
-{-
--- | insert a new receiver in a node. The insertion in receivers happens if the sequence key is unknown.The chisentechi is updated always.
-insertReceiver :: SeqT -> Node  m -> Node  m
-insertReceiver s k n 
-                | elemBy key s (view transmit n : map  (view transmissions) (view neighbor n)) = n  -- checks it's us or a known 
-                | otherwise                     = over neighbor (Neighbor s 1:) n' -- a new unreceived friend
-        where n' = over  (S.insert (k, view key s)) n 
--}
+        in set listeners ls . set neighbors ys $ n 
+
+-- | insert a add neighbor if the sequence key is unknown
+addNeighbor :: (?nconf :: NodeConfiguration) => Neighbor -> Node  m -> Node m
+addNeighbor n = over neighbors $ take (neighborlevel ?nconf) <$>
+        (maybe . (n:) <*> const  <*> find ((== view (transmissions . key) n) . view (transmissions . key)))
+
+-- | insert a add listener
+addListener :: SeqT -> Node  m -> Node m
+addListener (Seq k _) = over listeners ((k:) . delete k) 
+
+-- insert a message if not present
+addMessage :: (?nconf :: NodeConfiguration, Eq m) => Timed m -> Node m -> Node m
+addMessage m = over messages f where
+        f ms 
+          | any ((view message m ==) . view message) $ ms = ms  
+          | otherwise                                     = take (memory ?nconf) $  m : ms 
 
 -- | communication must have a transmitting sequence and can have a message
-data Comm m = Comm SeqT (Maybe (Timed m))
+data Comm  (t :: TChan)  m where
+        Publ :: SeqT -> Comm TCommon m
+        Info :: SeqT -> Maybe (Timed m) -> Comm TFree m
 
--- | Stepping results. Any constructor result hold the new node. Receiving mode is completed with the received message
-data Step  m    = Receive  Chan (Maybe (Comm m) -> Close  m)  -- ^ receive mode , possibly receive a Comm on chan
-                | Transmit Chan (Comm m) (Close  m)  -- ^ transmit mode, send a seq on chan
-                | Sleep (Close  m) -- ^ sleep mode , just step
+-- | Node possible states. Any state hold the add node as a Future. Receiving node is determined after the received message
+data State  m where
+                ReceiveCommon  :: Chan TCommon -> (Maybe (Comm TCommon m) -> Future m) -> State m  -- ^ receive mode , possibly receive a Comm on chan
+                ReceiveFree  :: Chan TFree -> (Maybe (Comm TFree m) -> Future m) -> State m  -- ^ receive mode , possibly receive a Comm on chan
+                TransmitCommon :: Chan TCommon -> Comm TCommon m -> Future m -> State m -- ^ transmit mode, send a seq on chan
+                TransmitFree :: Chan TFree -> Comm TFree m -> Future m -> State m -- ^ transmit mode, send a seq on chan
+                Sleep :: Future m -> State m -- ^ sleep mode , just step
 
--- | expose a node and a stepping , to permit node changing and query while hiding the stepping state
-data Close  m = Close {
+-- | expose a node and a step to a add state , to permit node changing and query while closing the stepping operation
+data Future  m = Future {
         _node :: Node  m,
-        _future :: Node  m -> Step  m
+        _future :: Node  m -> State m
         }
 
-$(makeLenses ''Close)
+makeLenses ''Future
+
+-- | proceed from a node to its next state
+applyFuture :: Future m -> State m
+applyFuture (Future m f) = f m
+
+mkNode  :: (?nconf :: NodeConfiguration) 
+        => Key -- ^ node unique id
+        -> m  -- ^ fixed node message
+        -> (Key, Node m)
+mkNode ((*3) -> n) x = (n + 4, Node 
+        (mkSeqProd (n + 2) (rodfrequency ?nconf) x)
+        []  --messages
+        (mkSeq n (numchannels ?nconf) (txfrequency ?nconf))
+        [] -- receivers
+        (mkBoolSeq (n + 1) (pufrequency ?nconf))
+        []
+        )
 

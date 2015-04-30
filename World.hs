@@ -1,77 +1,80 @@
-
-{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor #-}
+{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor,DataKinds, TemplateHaskell, GADTs #-}
+-- | A world is a set of positioned futures.
+-- Each step each Future is fed with its node wich 
 module World where
 
 -- import System.Random (randomR, StdGen, randomRs, mkStdGen)
 import Data.Maybe (catMaybes, isJust,listToMaybe)
 import Control.Arrow ((&&&), (***), first, second)
-import Data.List (lookup, groupBy, sortBy, mapAccumL)
+import Data.List (lookup, groupBy, sortBy, mapAccumL, deleteFirstsBy)
 import Data.Ord (comparing)
 import Data.Function  (on)
-import  qualified Data.Set as S
-import Control.Lens (view,over, set,_2)
+import Control.Lens (view,over, set,_2, toListOf)
+import Control.Lens.TH
 import Node
 import Seq
 import Timed
 import List (roll, select)
-
-import Node
 import Stepping
+import Positioned
 
--- | eliminate unresponsive sequences
-forget :: Int -> Node a m -> Node a m
-forget i = over neighbor (filter ((> i) . snd))
+data WorldConfiguration = WorldConfiguration {
+        radiorange :: Double
+        }
 
--- | switch full listening state
-switchListener :: Node a m -> Node a m
-switchListener n = set publicity  ((<2) . length . fst . partitionChiSenteChi $ n) n
+data World a m = World {
+        _nodes :: [Positioned (a m)] -- 
+        , _topkey :: Key -- ^ random key counter
+        }
+makeLenses ''World
 
+-- helper to match on positioned internals
+stepPat :: Positioned a -> (Positioned a, a)
+stepPat = id &&& view value
 
--- | partition listeners between node listener and unlistener 
-partitionChiSenteChi :: Node a m -> ([Key], [Key])
-partitionChiSenteChi n = (map fst . S.toList *** map fst . S.toList) . S.partition ((== view (transmit . key) n) . snd) $ view chisentechi n
+-- | compute the futures for state values. Sleep an transitting are just picked out, receivers are fed with a message when present
+stepState :: (?configuration :: WorldConfiguration) => [Positioned (State m)] -> Positioned (State m) -> Positioned (Future m)
 
+stepState _ (stepPat -> (p,Sleep x))                    = set value x p
+stepState _ (stepPat -> (p,TransmitCommon _ _ x))       = set value x p
+stepState _ (stepPat -> (p,TransmitFree _ _ x))         = set value x p
 
--- | empty the chisentechi bin
-resetChiSenteChi :: Node a m -> Node a m
-resetChiSenteChi  = set chisentechi S.empty
+stepState xs (stepPat -> (p,ReceiveCommon Common f))    = case isolated (radiorange ?configuration) p (transmittedCommon xs) of
+        Nothing -> set value (f Nothing) p
+        Just (view value ->  TransmitCommon _ m _) -> set value (f $ Just m) p
 
-every j i = i `mod` j == 0
+stepState xs (stepPat -> (p,ReceiveFree c f))           = case isolated (radiorange ?configuration) p (transmittedFree c xs) of
+        Nothing -> set value (f Nothing) p
+        Just (view value ->  TransmitFree _ m _) -> set value (f $ Just m) p
 
+-- stepping a world of futures by applying the nodes to their continuation and stepping each state
+stepWorld :: (?configuration :: WorldConfiguration) => World Future m -> World Future m
+stepWorld = over nodes $ (flip map <*> stepState) . map (fmap applyFuture)
 
-modNode (every 30 -> True) n = resetChiSenteChi n
-modNode _ n@(Node hs ms a ts rss ps _ _ w) = over neighbor (filter keepNeighbor) . switchListener $ Node hs ms a ts rss ps  ((<2) . length $ rss) w
+-- transmitters on common channel
+transmittedCommon ::  [Positioned (State t)] -> [Positioned (State t)]
+transmittedCommon = filter (select . view value)   where
+        select (TransmitCommon _ _ _) = True
+        select _ = False
 
-data World a m = World 
-        Int -- ^ frame count
-        [Close a m] -- ^ set of nodes
+-- transmitters on free channel 
+transmittedFree :: Chan TFree -> [Positioned (State t)] -> [Positioned (State t)]
+transmittedFree c = filter (select . view value)   where
+        select (TransmitFree c' _ _) = c == c'
+        select _ = False
 
--- | split a list of Step 
-partitionStep :: [Step a m] -> (
-        [((Chan,(SeqM Freq,  Maybe (Timed m))),Close a m)],
-        [(a,Chan,Maybe (SeqM Freq,  Maybe (Timed m)) -> Close a m)],
-        [Close a m]
-        )
-partitionStep [] = ([],[],[])
-partitionStep (Transmit c s n : xs) = let
-        (ts,rs,ss) = partitionStep xs
-        in (((c,s),n):ts,rs,ss)
-partitionStep (Receive x c f : xs) = let
-        (ts,rs,ss) = partitionStep xs
-        in (ts,(x,c,f):rs,ss)
-partitionStep (Sleep n : xs) = let
-        (ts,rs,ss) = partitionStep xs
-        in (ts,rs,n:ss)
+-- | remove the nearest to given coordinates node if possible
+remove :: Double -> Double -> World Future m -> World Future m
+remove x y = over nodes $ remove' x y where
+        remove' _ _ [] = []
+        remove' x y xs = tail . sortBy (comparing (distance (Positioned () x y))) $ xs
 
-stepWorld       :: (a -> a -> Bool) 
-                -> World a m 
-                -> World a m 
-stepWorld ckd (World n cs) = let 
-        xs = map (\(Close no f) -> f (modNode n no)) cs -- :: [Step Pos m] 
-        (ts,rs,ss) = partitionStep xs 
-        ms t = map (fst . head) . groupBy ((==) `on` (fst . fst)) . sortBy (comparing $ fst . fst) $
-                 filter (ckd t . view (_2 . node . load )) $ ts -- :: [(Chan,Seq MF)]
-        f (t,c,g) = g $ lookup c (ms t)
-        rs' = map f rs
-        in World (n + 1) $ map snd ts ++ rs' ++ ss
+-- | add a new node at the given coordinates
+add :: (?wconf:: WorldConfiguration, ?nconf:: NodeConfiguration, Eq m) => Double -> Double  -> m -> World Future m -> World Future m
+add x y m (World zs k) = World (Positioned z x y : zs) k' where
+        (k',z) = mkFuture k m
 
+-- | visit nodes
+worldNodes :: World Future m -> [Positioned (Node m)] 
+worldNodes = over (traverse . value) (view node) . view nodes
+        

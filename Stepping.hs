@@ -1,76 +1,70 @@
-{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor #-}
+{-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor, GADTs #-}
 module Stepping where
 
 import System.Random (randomR, StdGen, randomRs, mkStdGen)
-import Data.Maybe (catMaybes, isJust,listToMaybe,isNothing)
+import Data.Maybe (catMaybes, isJust,listToMaybe,isNothing, fromJust)
 import Control.Arrow ((&&&), (***), first, second)
 import Data.List (lookup, groupBy, sortBy, mapAccumL)
 import Data.Ord (comparing)
 import Data.Function  (on)
 import  qualified Data.Set as S
-import Control.Lens (view,over, set,_2, Getting)
+import Control.Lens (view,over, set,_2, Getting, to)
 import Node
 import Seq
 import Timed
 import List (roll, select)
 
--- | check the presence of a subvalue
-elemBy :: Eq a => Getting a t a -> t -> [t] -> Bool 
-elemBy l x = any $ (== view l x) . view l
 
--- insert a message if not present
-insertMessage :: (?configuration :: Configuration, Eq m) => Maybe (Timed m) -> [Timed m] -> [Timed m]
-insertMessage Nothing ms = ms
-insertMessage (Just m) ms 
-        | elemBy message m ms = ms -- what if the message is newer ? 
-        | otherwise = take (memory ?configuration) $  m : ms 
 
 -- | Stepping state
-data Cond       = MustTransmit -- ^ schedule a transmitting
-                | MustReceive  -- ^ scheduled a receiving
-                | UnMust  -- ^ free 
+data Cond     where 
+        MustTransmit :: Cond  -- ^ schedule a transmitting
+        MustReceive :: Cond  -- ^ scheduled a receiving
+        UnMust :: Cond  -- ^ free 
 
 -- | close on a node and its future
-close :: (?configuration :: Configuration, Eq m) => Cond -> Node  m -> Close  m
-close c n = Close n (step c)
+close :: (?nconf :: NodeConfiguration, Eq m) => Cond -> Node  m -> Future  m
+close c n = Future n (step c)
 
--- | Core logic. Node a fields are tested sequentially with pattern matching. First success fires the right Step
-step    :: (?configuration :: Configuration, Eq m) 
+-- | Core logic. Node a fields are tested sequentially with pattern matching. 
+-- First success fires the right Step
+step    :: (?nconf :: NodeConfiguration, Eq m) 
         => Cond 
         -> Node  m 
-        -> Step  m
-
--- Obliged to listen in the common chan. It happens after a publicity
+        -> State  m
+ 
+-- Obliged to listen in the common chan. It happens after a publicity. 
+-- This has to be respected by contract with other nodes
 step MustReceive (Node 
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (tailSeq -> ts) 
-        (tailNeighbor -> rss) 
+        (tailNeighbors -> rss) 
         (tailSeq -> ps) 
         ls
-        ) = Receive  Common f where
-                f Nothing = close UnMust (Node hs ms  ts rss ps l q chi)  
-                f (Just (Comm s Nothing)) = close UnMust (insertReceiver s (view key s) $ Node hs ms  ts rss ps ls)  
+        ) = ReceiveCommon  Common f where
+                f Nothing = close UnMust $ Node hs ms ts rss ps ls
+                f (Just (Publ s)) = close UnMust (addNeighbor (Neighbor s 0) $ Node hs ms  ts rss ps ls) -- doesn't use sync to avoid loop 
 
--- try to publicize transmit seqs on a sync window on common channel, switch to must receive by contract (WRONG)
+-- try to publicize transmit seqs on a sync window on common channel, switch to must receive by contract.
 step MustTransmit (Node 
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (tailSeq -> ts) 
-        (tailNeighbor -> rss) 
+        (tailNeighbors -> rss) 
         (tailSeq -> ps) 
         ls
-        ) = Transmit Common (Comm ts Nothing) . close MustReceive $ Node hs ms  ts rss ps ls
+        ) = TransmitCommon Common (Publ ts) . close MustReceive $ Node hs ms  ts rss ps ls
 
--- time to transmit a our transmit seq if no other seq is trustable 
+-- time to transmit our transmit seq if no other seq is trustable 
 step UnMust (Node 
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (Seq i (Just c:ts)) 
-        (tailNeighbor  &&& filter ((==0) . view misseds) -> (rss,[])) 
+        (tailNeighbors  &&& filter ((==0) . view misseds) -> (rss,[])) 
         (tailSeq -> ps) 
         ls
-        )  = Transmit (Chan c) (Comm (Seq i ts) $ listToMaybe ms) . close UnMust $ 
+        )  = TransmitFree (Free c) (Info (Seq i ts) $ listToMaybe ms) . close UnMust $ 
                 Node hs (roll ms)  (Seq i ts) rss ps ls
 
 -- time to transmit a neighbor transmit seq and roll the neighbor seqs for fairness
@@ -78,10 +72,10 @@ step UnMust (Node
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (Seq i (Just c:ts)) 
-        ((roll  &&& filter ((==0). view misseds)). tailNeighbor  -> (rss, x:_)) 
+        ((roll  &&& filter ((==0). view misseds)). tailNeighbors  -> (rss, x:_)) 
         (tailSeq -> ps) 
         ls
-        ) = Transmit (Chan c) (Comm (view transmissions x) $ listToMaybe ms) . close UnMust $ 
+        ) = TransmitFree (Free c) (Info (view transmissions x) $ listToMaybe ms) . close UnMust $ 
                 Node hs (roll ms)  (Seq i ts) rss ps ls
 
 --  time to listen on a receiving seq
@@ -89,91 +83,79 @@ step UnMust (Node
                 (tailSeq -> hs) 
                 (decTimeds -> ms) 
                 (tailSeq -> ts) 
-                (select (isJust . head . view (transmissions . stream)) -> Just (Neighbor s@(Seq i (Just c : xs)) n, g))
-                (tailSeq -> ps) l q chi
-                ) = Receive  (Chan c) f where
-                        new m n' = Node hs (insertMessage m ms)  ts (tailNeighbor . g $ Neighbor s n') ps l q chi
-                        f Nothing = close UnMust . new Nothing $ n + 1  -- missed appointment
-                        f (Just (Comm s' m)) = close UnMust . insertReceiver s' i . new m $ 0 -- got it , set to trusted
+                (select (isJust . head . view (transmissions . stream)) -> Just (Neighbor s n, g))
+                (tailSeq -> ps) 
+                ls
+                ) = ReceiveFree  (Free $ fromJust . head . view stream $ s) $ close UnMust . f where
+                        add n' = clean $ Node hs ms ts (tailNeighbors . g $ Neighbor s n') ps ls
+                        f Nothing = add $ n + 1  -- missed appointment
+                        f (Just (Info s' (Just m))) = addMessage m . addNeighbor (Neighbor s' 1) . add $ 0 
+                                -- got it , set to trusted
+                        f (Just (Info s' Nothing)) = addNeighbor (Neighbor s' 1). add $ 0 -- got it , set to trusted
 
 -- insert a personal message with fresh ttl in the message list and sleep
 step UnMust (Node 
         (Seq n (Just h:hs)) 
         (decTimeds -> ms) 
         (tailSeq -> ts) 
-        (tailNeighbor -> rss) 
-        (tailSeq -> ps) l q chi
-        ) = Sleep . close UnMust $ 
-                Node (Seq n hs) (insertMessage (Just $ Timed (lmessagettl ?configuration) h) ms)  ts rss ps l q chi
+        (tailNeighbors -> rss) 
+        (tailSeq -> ps)
+        ls
+        ) = Sleep . close UnMust $ addMessage  (Timed (lmessagettl ?nconf) h) $ 
+                Node (Seq n hs) ms ts rss ps ls
 
--- time to transmit on common chan our transmit seq, setting the duty to listen right after, publicizing self transmittion times
+-- time to transmit on common chan our transmit seq, setting the duty to listen right after, 
+-- publicizing self transmittion times
 step UnMust (Node 
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (tailSeq -> ts) 
-        (tailNeighbor -> rss) 
-        (Seq i (True:ps)) l q chi
-        ) = Transmit Common (Comm ts Nothing) $ close MustReceive $ Node hs ms  ts rss (Seq i ps) l q chi
+        (tailNeighbors -> rss) 
+        (Seq i (True:ps)) 
+        ls
+        ) = TransmitCommon Common (Publ ts) $ close MustReceive $
+                 Node hs ms  ts rss (Seq i ps) ls
 
--- time to receive freely on common channel, or we are free listening (high mode) or we are starving , noone is listening (publicizing our transmission seq)
-step UnMust (Node 
+-- time to receive freely on common channel and use sync to force our presence on the neighbor 
+step UnMust (shouldSync &&& id -> (True, Node 
         (tailSeq -> hs) 
         (decTimeds -> ms) 
         (tailSeq -> ts) 
-        (tailNeighbor -> rss) 
+        (tailNeighbors -> rss) 
         (tailSeq -> ps) 
-        l 
-        (id &&& (l ||) -> (q,True)) chi
-        ) = Receive  Common f where
-                f Nothing = close UnMust $ Node hs ms  ts rss ps l q chi 
-                f (Just (Comm s Nothing)) =  close (if l then MustTransmit else UnMust) $ 
-                                (if q then insertReceiver s (view key s) else id) $ Node hs ms  ts rss ps l q chi 
+        ls
+        )) = ReceiveCommon Common f where
+                f Nothing = close UnMust $ Node hs ms  ts rss ps ls
+                f (Just (Publ s)) 
+                        | not (view key s `elem`  ls) = close MustTransmit $ addNeighbor (Neighbor s 0) $ 
+                                Node hs ms  ts rss ps ls -- only reply on non publicizing neighbor
+                        | otherwise = close UnMust $ addNeighbor (Neighbor s 0) $ 
+                                Node hs ms  ts rss ps ls
+
+
+
+-- time to receive freely on common channel, missing neighbors
+step UnMust (shouldListen &&& id -> (True, Node 
+        (tailSeq -> hs) 
+        (decTimeds -> ms) 
+        (tailSeq -> ts) 
+        (tailNeighbors -> rss) 
+        (tailSeq -> ps) 
+        ls
+        )) = ReceiveCommon  Common f where
+                f Nothing = close UnMust $ Node hs ms  ts rss ps ls
+                f (Just (Publ s)) =  close UnMust $ addNeighbor (Neighbor s 0) $ Node hs ms  ts rss ps ls
 
 -- time to sleep
-step UnMust (Node hs (decTimeds -> ms) (tailSeq -> ts) (tailNeighbor -> rss) (tailSeq -> ps) l q chi) = Sleep . close UnMust $ Node hs ms ts rss ps l q chi
-
--- boot a sleeping node
-mkStep :: (?configuration :: Configuration,Eq m) => Node  m -> Step  m
-mkStep = Sleep . close UnMust
+step UnMust (Node hs (decTimeds -> ms) (tailSeq -> ts) (tailNeighbors -> rss) (tailSeq -> ps) ls) = 
+        Sleep . close UnMust $ Node hs ms ts rss ps ls
 
 
-mkBoolSeq       :: Key -- ^ random seed and identifier
-                -> Int -- ^ frequency of True values
-                -> Seq Bool
-mkBoolSeq s@(Key n) freq = Seq s $ map (==0) $ randomRs (0,freq) $ mkStdGen n
 
-
--- | pseudo random sequence of Nothing and Just Freq
-mkSeq   :: Key  -- ^ identifier, random seed
-        -> Int  -- ^ channel space power
-        -> Int  -- ^ mean delta between positives
-        -> SeqM Int
-mkSeq s@(Key n) chans freq = let
-        Seq _ fs = mkBoolSeq s freq
-        cs = randomRs (0,chans) $ mkStdGen $ n + 1
-        in Seq s $ snd $ mapAccumL (\(c:cs) d -> (cs,if d then Just c else Nothing)) cs fs
-
-mkSeqProd       :: Key
-                -> Int
-                -> m 
-                -> SeqM m
-mkSeqProd n freq x = Seq n [if y then Just x else Nothing | y <- view stream $ mkBoolSeq n freq] 
-
-mkNode  :: (?configuration :: Configuration) 
+mkFuture  :: (Eq m, ?nconf :: NodeConfiguration) 
         => Key -- ^ node unique id
-        -> m  
-        -> Node  m
-mkNode ((*3) -> n) x = Node 
-        (mkSeqProd (n + 2) (rodfrequency ?configuration) x)
-        []  --messages
-        (mkSeq n (numchannels ?configuration) (txfrequency ?configuration))
-        [] -- receivers
-        (mkBoolSeq (n + 1) (pufrequency ?configuration))
-        True
-        True
-        S.empty
-
-
-       
+        -> m  -- ^ fixed node message
+        -> (Key, Future m)
+mkFuture n m = second (flip Future $ step UnMust) (mkNode n m) 
 
 
