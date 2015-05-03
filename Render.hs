@@ -75,7 +75,8 @@ data Graphics = Graphics {
         _world :: World Future Char,
         _selected :: Maybe Key,
 	_radiorange :: Float,
-	_curname :: Char
+	_curname :: Char,
+	_highlighted :: Maybe Key
         }
 
 makeLenses ''Graphics
@@ -86,7 +87,7 @@ main =
         in playIO (InWindow "Zen" (800, 600) (5, 5))
                 0 -- color
                 30 -- frames
-                (Graphics (World [] 0) Nothing 100 'a') -- starting world
+                (Graphics (World [] 0) Nothing 100 'a' Nothing) -- starting world
                 render -- render world
                 handle -- handle events
                 (\_ w -> return $ over world (stepWorld (view radiorange w)) w) -- stepworld
@@ -96,10 +97,12 @@ main =
 
 handle :: (?nconf :: NodeConfiguration) => Event -> Graphics -> IO Graphics
 
+
 -- map the movement if a node is selected
 handle (EventMotion p@(x',y')) g@(view selected &&& view (world . nodes) -> (Just k, xs)) = let
         Just (view value -> z, f) = select ((== k) . view (value . node . transmit . key)) $ xs
-        in return $ set (world . nodes) (f $ Positioned z x' y') g
+        in return $ set (world . nodes) (f $ Positioned z x' y') $ set highlighted Nothing g
+handle (EventMotion p@(x',y')) g = return $ set highlighted (nearest x' y' (view world g)) g
 
 -- add a new node in mouse position
 handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (x',y')) g = do
@@ -131,11 +134,22 @@ nodePicture rr (Positioned (ms, ReceiveCommon _ _) x0 y0) = renderText rr blue m
 nodePicture rr (Positioned (ms, TransmitFree _ _ _) x0 y0) = renderText rr yellow ms x0 y0 
 nodePicture rr (Positioned (ms, TransmitCommon _ _ _) x0 y0) = renderText  rr red ms x0 y0 
 
+fromPositioned (Positioned _ x y) = (x,y)
+positionOf :: Graphics -> Key -> Maybe (Positioned (Future Char))
+positionOf g k = let 
+	ps = view (world . nodes) g
+	ks = map (view (value .node . transmit . key)) ps
+	in lookup k $ zip ks ps
 render :: Graphics -> IO Picture
-render (Graphics (World xs _) _ rr _) = return $ 
+render (Graphics (World xs _) _ rr _ ms) = return $ 
         let  rs = over (traverse . value) 
                         (map (view message) . view (node . messages) 
                                 &&& applyFuture) xs
+	{-
+	let  	rays Nothing = []
+		rays (Just x) = color blue $ Pictures $ map (\p -> Line [fromPositioned x,fromPositioned p])
+			 (view (value . node . neighbors . stream . key) x) 
+	-}
         in Pictures $ map (nodePicture rr) rs
         
         
