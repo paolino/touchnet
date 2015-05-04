@@ -23,6 +23,8 @@ $(makeLenses ''Seq)
 tailSeq :: Seq a -> Seq a
 tailSeq = over stream tail 
 
+headSeq :: Seq a -> a
+headSeq = head . view  stream 
 -- | match sequences by identifier . A lot of differentiating power is lost
 instance Eq (Seq a) where
         (==) (Seq i _) (Seq j _) = i == j

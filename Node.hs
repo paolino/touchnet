@@ -18,7 +18,8 @@ data NodeConfiguration = NodeConfiguration {
         neighbormemory :: Int, -- ^ maximum number of neighbor
         memory :: Int, -- ^ number of remembered messages
         numchannels :: Int, -- ^ channel spectrum 
-        lmessagettl :: Int -- ^ message duration in memory
+        lmessagettl :: Int, -- ^ message duration in memory
+        dropaneigbor :: Int
         } deriving (Show)-- , Typeable, Data)
 
 
@@ -65,7 +66,8 @@ data  Node m = Node {
         _transmit :: SeqT,  -- ^ transmitting sequence 
         _neighbors :: [Neighbor] , -- ^ set of receiving sequences 
         _contract :: Seq Bool, -- ^ self spot sequence
-        _listeners :: [Key] -- ^ listeners
+        _listeners :: [Key], -- ^ listeners
+        _anticluster :: Seq Bool -- ^ listeners
         } 
         deriving Show
 
@@ -78,7 +80,10 @@ shouldSync n = length (view listeners n) < alertlevel ?nconf
 
 -- | starving for receivers
 shouldListen ::  (?nconf :: NodeConfiguration) => Node m -> Bool
-shouldListen n = length (view neighbors n) < neighborlevel ?nconf
+shouldListen n = 
+        (length (view neighbors n) < neighborlevel ?nconf)
+        ||
+        (headSeq (view anticluster n))
 
 -- | eliminate lost neighbors even from listeners (based on simmetric signal property)
 clean ::(?nconf :: NodeConfiguration) => Node m -> Node m
@@ -142,12 +147,13 @@ mkNode  :: (?nconf :: NodeConfiguration)
         => Key -- ^ node unique id
         -> m  -- ^ fixed node message
         -> (Key, Node m)
-mkNode n x = (n + 4, Node 
+mkNode n x = (n + 5, Node 
         (mkSeqProd (n + 3) (rodfrequency ?nconf) x)
         []  --messages
         (mkSeq n (numchannels ?nconf) (txfrequency ?nconf))
         [] -- receivers
         (mkBoolSeq (n + 2) (pufrequency ?nconf))
         []
+        (mkBoolSeq (n + 4) (dropaneigbor ?nconf))
         )
 

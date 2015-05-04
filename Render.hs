@@ -61,14 +61,15 @@ sample = Configuration
 nodeConf = NodeConfiguration {
         txfrequency = 20, -- ^ transmissions frequency
         pufrequency = 100, -- ^ pubblicity frequency
-        rodfrequency = 100, -- ^ node self message frequency
+        rodfrequency = 50, -- ^ node self message frequency
         droplevel = 5, -- ^ max number of consecutive missed listenings before dropping
         alertlevel = 1, -- ^ minimum number of listeners to stop using sync listening window on common channel
         neighborlevel = 1, -- ^ minimum number of neighbors to stop listening on common channel
         neighbormemory = 5, -- ^ minimum number of neighbors to stop listening on common channel
         memory = 10, -- ^ number of remembered messages
         numchannels = 10, -- ^ channel spectrum 
-        lmessagettl = 500 -- ^ message duration in memory
+        lmessagettl = 200, -- ^ message duration in memory
+        dropaneigbor = 20 -- ^ anticlustering
         }
 
 
