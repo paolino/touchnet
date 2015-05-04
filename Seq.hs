@@ -41,7 +41,7 @@ mkBoolSeq       :: Key -- ^ random seed and identifier
 mkBoolSeq s@(Key n) freq = Seq s $ map (==0) $ randomRs (0,freq) $ mkStdGen n
 
 
--- | pseudo random sequence of Nothing and Just Freq
+-- | pseudo random sequence of Nothing and Just Freq, consume 2 keys
 mkSeq   :: Key  -- ^ identifier, random seed
         -> Int  -- ^ channel space power
         -> Int  -- ^ mean delta between positives

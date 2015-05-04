@@ -89,9 +89,9 @@ step UnMust (Node
                 ) = ReceiveFree  (Free $ fromJust . head . view stream $ s) $ close UnMust . f where
                         add n' = clean $ Node hs ms ts (tailNeighbors . g $ Neighbor s n') ps ls
                         f Nothing = add $ n + 1  -- missed appointment
-                        f (Just (Info s' (Just m))) = addMessage m . addNeighborOrListener s'  . add $ 0 
+                        f (Just (Info s' (Just m))) = addMessage m . addNeighborOrListener s s'  . add $ 0 
                                 -- got it , set to trusted
-                        f (Just (Info s' Nothing)) = addNeighborOrListener s'. add $ 0 -- got it , set to trusted
+                        f (Just (Info s' Nothing)) = addNeighborOrListener s s'. add $ 0 -- got it , set to trusted
 
 -- insert a personal message with fresh ttl in the message list and sleep
 step UnMust (Node 
@@ -104,7 +104,7 @@ step UnMust (Node
         ) = Sleep . close UnMust $ addMessage  (Timed (lmessagettl ?nconf) h) $ 
                 Node (Seq n hs) ms ts rss ps ls
 
--- time to transmit on common chan our transmit seq, setting the duty to listen right after, 
+-- time to transmit on common chan our transmit seq, setting the duty to listen right after, view (transmit . key) n
 -- publicizing self transmittion times
 step UnMust (Node 
         (tailSeq -> hs) 

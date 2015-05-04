@@ -69,10 +69,6 @@ remove x y = over nodes $ remove' x y where
         remove' x y xs = tail . sortBy (comparing (distance (Positioned () x y))) $ xs
 
 -- | remove the nearest to given coordinates node if possible
-nearest :: Float -> Float -> World Future m -> Maybe Key
-nearest x y = fmap (view (value . node . transmit . key)) . nearest' . view nodes where
-        nearest' [] = Nothing
-        nearest' xs = Just . head . sortBy (comparing (distance (Positioned () x y))) $ xs
 
 -- | add a new node at the given coordinates
 add :: (?nconf:: NodeConfiguration, Eq m) => Float -> Float  -> m -> World Future m -> World Future m

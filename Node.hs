@@ -46,6 +46,7 @@ data Neighbor = Neighbor {
         _transmissions :: SeqT, -- ^ neighbor transmission sequence
         _misseds :: Int -- ^ count of missed listenings (out of reach), very improbable idea to bring to hardware
         }
+        deriving Show
 
 makeLenses ''Neighbor
 
@@ -66,6 +67,7 @@ data  Node m = Node {
         _contract :: Seq Bool, -- ^ self spot sequence
         _listeners :: [Key] -- ^ listeners
         } 
+        deriving Show
 
 makeLenses ''Node
 
@@ -93,14 +95,16 @@ addNeighbor' n = over neighbors $ take (neighbormemory ?nconf) <$>
 addNeighbor :: (?nconf :: NodeConfiguration) => SeqT -> Node  m -> Node m
 addNeighbor s = addNeighbor' (Neighbor s 0)
 
-addNeighborOrListener :: (?nconf :: NodeConfiguration) => SeqT -> Node  m -> Node m
-addNeighborOrListener s n 
-	| view key s == view (transmit . key) n = addListener s n
-	| otherwise = addNeighbor' (Neighbor s 1) n 
+addNeighborOrListener :: (?nconf :: NodeConfiguration) => SeqT -> SeqT -> Node  m -> Node m
+addNeighborOrListener sl st n 
+	| view key st == view (transmit . key) n = addListener sl n
+	| otherwise = addNeighbor' (Neighbor st 1) n 
 
 -- | insert a add listener
 addListener :: SeqT -> Node  m -> Node m
-addListener (Seq k _) = over listeners ((k:) . delete k) 
+addListener (Seq k _) n 
+        |  view (transmit . key) n == k = n
+        |  otherwise = over listeners ((k:) . delete k) n
 
 -- insert a message if not present
 addMessage :: (?nconf :: NodeConfiguration, Eq m) => Timed m -> Node m -> Node m
@@ -138,12 +142,12 @@ mkNode  :: (?nconf :: NodeConfiguration)
         => Key -- ^ node unique id
         -> m  -- ^ fixed node message
         -> (Key, Node m)
-mkNode ((*3) -> n) x = (n + 4, Node 
-        (mkSeqProd (n + 2) (rodfrequency ?nconf) x)
+mkNode n x = (n + 4, Node 
+        (mkSeqProd (n + 3) (rodfrequency ?nconf) x)
         []  --messages
         (mkSeq n (numchannels ?nconf) (txfrequency ?nconf))
         [] -- receivers
-        (mkBoolSeq (n + 1) (pufrequency ?nconf))
+        (mkBoolSeq (n + 2) (pufrequency ?nconf))
         []
         )
 

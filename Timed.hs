@@ -8,6 +8,7 @@ data Timed m = Timed {
         _ttl :: Int,
         _message :: m
         }
+        deriving Show
 
 $(makeLenses ''Timed)
 

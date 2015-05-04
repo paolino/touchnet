@@ -16,6 +16,7 @@ import Control.Concurrent.STM
 import Control.Concurrent hiding (Chan)
 import Prelude hiding (mapM, concat, foldr, concatMap, elem, sum)
 import Graphics.Gloss
+import Data.Maybe
 import System.Random
 import Graphics.Gloss.Interface.IO.Game hiding (Key)
 import Data.Foldable
@@ -106,9 +107,16 @@ handle (EventKey (MouseButton RightButton) Down (Modifiers Up Up Up) (x',y')) g 
 	return $ over curname succ $ over world (add x' y' $ view curname g) g
 
 
-handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (x',y')) g = return $ set selected (nearest x' y' $ view world g) g
+handle (EventKey (MouseButton LeftButton) Down (Modifiers Up Up Up) (x',y')) g = do 
+        let     n = fmap head $ nearest x' y' $ view (world . nodes) g
+                m = fmap (view (value . node . transmit . key)) n
 
-handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) _) g = return $ set selected Nothing g
+        print (view (value . node) $ fromJust n)
+        return $ set selected m g
+
+handle (EventKey (MouseButton LeftButton) Up (Modifiers Up Up Up) _) g = do
+        
+        return $ set selected Nothing g
 
 handle _ x = return x
 {-
