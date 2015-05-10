@@ -112,16 +112,13 @@ addListener (Seq k _) n
         |  otherwise = over listeners ((k:) . delete k) n
 
 -- insert a message if not present
-addMessage :: (?nconf :: NodeConfiguration, Eq m) => Timed m -> Node m -> Node m
-addMessage m = over messages f where
-        f ms 
-          | any ((view message m ==) . view message) $ ms = ms  
-          | otherwise                                     = take (memory ?nconf) $  m : ms 
+addMessage :: (?nconf :: NodeConfiguration, Eq m) => (m,Int) -> Node m -> Node m
+addMessage m = over messages $ take (memory ?nconf) . hitm m  
 
 -- | communication must have a transmitting sequence and can have a message
 data Comm  (t :: TChan)  m where
         Publ :: SeqT -> Comm TCommon m
-        Info :: SeqT -> Maybe (Timed m) -> Comm TFree m
+        Info :: SeqT -> Maybe (m,Int) -> Comm TFree m
 
 -- | Node possible states. Any state hold the add node as a Future. Receiving node is determined after the received message
 data State  m where

@@ -36,7 +36,7 @@ step    :: (?nconf :: NodeConfiguration, Eq m)
 -- This has to be respected by contract with other nodes
 step MustReceive (Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (tailSeq -> ps) 
@@ -49,7 +49,7 @@ step MustReceive (Node
 -- try to publicize transmit seqs on a sync window on common channel, switch to must receive by contract.
 step MustTransmit (Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (tailSeq -> ps) 
@@ -60,31 +60,31 @@ step MustTransmit (Node
 -- time to transmit our transmit seq if no other seq is trustable 
 step UnMust (Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (Seq i (Just c:ts)) 
         (tailNeighbors  &&& filter ((==0) . view misseds) -> (rss,[])) 
         (tailSeq -> ps) 
         ls
         (tailSeq -> ds)
-        )  = TransmitFree (Free c) (Info (Seq i ts) $ listToMaybe ms) . close UnMust $ 
+        )  = TransmitFree (Free c) (Info (Seq i ts) $ least ms) . close UnMust $ 
                 Node hs (roll ms)  (Seq i ts) rss ps ls ds
 
 -- time to transmit a neighbor transmit seq and roll the neighbor seqs for fairness
 step UnMust (Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (Seq i (Just c:ts)) 
         ((roll  &&& filter ((==0). view misseds)). tailNeighbors  -> (rss, x:_)) 
         (tailSeq -> ps) 
         ls
         (tailSeq -> ds)
-        ) = TransmitFree (Free c) (Info (view transmissions x) $ listToMaybe ms) . close UnMust $ 
+        ) = TransmitFree (Free c) (Info (view transmissions x) $ least ms) . close UnMust $ 
                 Node hs (roll ms)  (Seq i ts) rss ps ls ds
 
 --  time to listen on a receiving seq
 step UnMust (Node 
                 (tailSeq -> hs) 
-                (decTimeds -> ms) 
+                (turn -> ms) 
                 (tailSeq -> ts) 
                 (select (isJust . head . view (transmissions . stream)) -> Just (Neighbor s n, g))
                 (tailSeq -> ps) 
@@ -100,20 +100,20 @@ step UnMust (Node
 -- insert a personal message with fresh ttl in the message list and sleep
 step UnMust (Node 
         (Seq n (Just h:hs)) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (tailSeq -> ps)
         ls
         (tailSeq -> ds)
-        ) = Sleep . close UnMust $ addMessage  (Timed (lmessagettl ?nconf) h) $ 
+        ) = Sleep . close UnMust $ addMessage  (h,lmessagettl ?nconf) $ 
                 Node (Seq n hs) ms ts rss ps ls ds
 
 -- time to transmit on common chan our transmit seq, setting the duty to listen right after, view (transmit . key) n
 -- publicizing self transmittion times
 step UnMust (Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (Seq i (True:ps)) 
@@ -124,7 +124,7 @@ step UnMust (Node
 -- time to receive freely on common channel and use sync to force our presence on the neighbor 
 step UnMust (shouldSync &&& id -> (True, Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (tailSeq -> ps) 
@@ -141,7 +141,7 @@ step UnMust (shouldSync &&& id -> (True, Node
 -- time to receive freely on common channel, missing neighbors
 step UnMust (shouldListen &&& id -> (True, Node 
         (tailSeq -> hs) 
-        (decTimeds -> ms) 
+        (turn -> ms) 
         (tailSeq -> ts) 
         (tailNeighbors -> rss) 
         (tailSeq -> ps) 
@@ -152,7 +152,7 @@ step UnMust (shouldListen &&& id -> (True, Node
                 f (Just (Publ s)) =  close UnMust $ addNeighbor s $ Node hs ms  ts rss ps ls ds
 
 -- time to sleep
-step UnMust (Node hs (decTimeds -> ms) (tailSeq -> ts) (tailNeighbors -> rss) (tailSeq -> ps) ls (tailSeq -> ds))=
+step UnMust (Node hs (turn -> ms) (tailSeq -> ts) (tailNeighbors -> rss) (tailSeq -> ps) ls (tailSeq -> ds))=
         Sleep . close UnMust $ Node hs ms ts rss ps ls ds
 
 
