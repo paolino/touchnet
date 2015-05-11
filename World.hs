@@ -11,7 +11,7 @@ import Data.Ord (comparing)
 import Data.Function  (on)
 import Control.Lens (view,over, set,_2, toListOf)
 import Control.Lens.TH
-import Control.Arrow
+import Control.Applicative
 import Data.Traversable
 import Node
 import Seq
