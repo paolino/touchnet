@@ -1,6 +1,7 @@
 {-# LANGUAGE ViewPatterns, ImplicitParams, DeriveDataTypeable, TemplateHaskell, DeriveFunctor, DataKinds, KindSignatures, GADTs, PolyKinds #-}
 
 module Node where
+import Control.Applicative
 import Control.Lens
 import Control.Arrow (second, first)
 import Data.List (partition, delete, find)
